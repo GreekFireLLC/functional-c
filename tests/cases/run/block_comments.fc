@@ -1,0 +1,11 @@
+/* Block comments are supported.
+   They may span lines. */
+int main()
+{
+    let a = 1 /* inline */ + 2;
+    print(a); // line comment
+    /* print(999); */
+    return 0;
+}
+
+//! out: 3

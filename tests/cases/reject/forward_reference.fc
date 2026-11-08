@@ -1,0 +1,11 @@
+int main()
+{
+    return helper();
+}
+
+int helper()
+{
+    return 1;
+}
+
+//! error: FC3004 3:12 'helper' is defined later (at 6:5)

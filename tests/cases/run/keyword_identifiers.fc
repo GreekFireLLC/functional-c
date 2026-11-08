@@ -1,0 +1,35 @@
+// Valid Functional C names that are F# keywords, F# union cases, or F# special identifiers.
+int match(int type)
+{
+    let fun = (int val) => val * type;
+    return fun(2);
+}
+
+int None(int Some)
+{
+    return Some + 1;
+}
+
+bool begin(bool end)
+{
+    return !end;
+}
+
+int main()
+{
+    let open = match(5);
+    let _private = None(open);
+    let __LINE__ = 7;
+    let Ok = begin(false) ? _private + __LINE__ : 0;
+    print(open);
+    print(_private);
+    print(Ok);
+    return 0;
+}
+
+//! out: 10
+//! out: 11
+//! out: 18
+//! fs-contains: let ``match`` (``type``: int) : int =
+//! fs-contains: let u'None (u'Some: int) : int =
+//! fs-contains: let u'__LINE__ = 7

@@ -1,0 +1,15 @@
+// A call used as a statement: its value is discarded, its side effect happens exactly once.
+int marker()
+{
+    print(42);
+    return 7;
+}
+
+int main()
+{
+    marker();
+    return 0;
+}
+
+//! out: 42
+//! fs-contains: fc'ignore (marker ())

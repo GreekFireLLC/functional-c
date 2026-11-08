@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FunctionalC.Compiler/FunctionalC.Compiler.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FunctionalC.Tests/FunctionalC.Tests.csproj" />
+  </Folder>
+</Solution>

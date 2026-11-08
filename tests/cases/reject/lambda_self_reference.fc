@@ -1,0 +1,7 @@
+int main()
+{
+    let fact = (int n) => n <= 1 ? 1 : n * fact(n - 1);
+    return fact(5);
+}
+
+//! error: FC3015 3:44 cannot be used inside its own initializer

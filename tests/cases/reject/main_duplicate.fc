@@ -1,0 +1,11 @@
+int main()
+{
+    return 0;
+}
+
+int main()
+{
+    return 1;
+}
+
+//! error: FC3006 6:5 duplicate 'main'

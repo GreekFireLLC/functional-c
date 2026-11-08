@@ -1,0 +1,8 @@
+int main()
+{
+    let x = 1;
+    x = 2;
+    return x;
+}
+
+//! error: FC3002 4:5 cannot assign to 'x'

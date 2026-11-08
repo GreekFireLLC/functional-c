@@ -1,0 +1,11 @@
+void hello()
+{
+    print(1);
+}
+
+int main()
+{
+    return 0;
+}
+
+//! error: FC2002 1:1 'void' is not supported

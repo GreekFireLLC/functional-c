@@ -1,0 +1,30 @@
+// Multi-parameter and zero-parameter lambdas, lambdas calling lambdas, and a lambda that calls
+// its enclosing recursive function.
+int fact(int n)
+{
+    let step = (int k) => k * fact(k - 1);
+    return n <= 1 ? 1 : step(n);
+}
+
+int main()
+{
+    let base = 100;
+    let scale = (int x, int y) => (x + y) * 2 + base;
+    let answer = () => 42;
+    let twice = (int x) => scale(x, x);
+    let isBig = (int x) => x > 50;
+    print(scale(1, 2));
+    print(answer());
+    print(twice(3));
+    print(isBig(twice(0)) ? 1 : 0);
+    print(fact(5));
+    return 0;
+}
+
+//! out: 106
+//! out: 42
+//! out: 112
+//! out: 1
+//! out: 120
+//! fs-contains: let rec fact (n: int) : int =
+//! fs-contains: let answer = (fun () -> 42)

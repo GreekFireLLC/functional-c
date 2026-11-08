@@ -1,0 +1,8 @@
+int main()
+{
+    let x = 1;
+    x++;
+    return x;
+}
+
+//! error: FC1005 4:6 bindings are immutable

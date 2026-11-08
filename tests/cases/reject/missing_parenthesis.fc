@@ -1,0 +1,7 @@
+int main()
+{
+    print(1 + 2;
+    return 0;
+}
+
+//! error: FC2001 3:16 expected ')' to close the argument list of 'print' but found ';'

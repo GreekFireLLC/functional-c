@@ -1,0 +1,14 @@
+// main's return value becomes the process exit code, and main is an ordinary callable function.
+int main()
+{
+    print(1);
+    return 3;
+}
+
+int callsMain()
+{
+    return main() + 1;
+}
+
+//! out: 1
+//! exit: 3

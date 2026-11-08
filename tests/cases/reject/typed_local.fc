@@ -1,0 +1,7 @@
+int main()
+{
+    int x = 5;
+    return x;
+}
+
+//! error: FC2002 3:5 typed local declarations

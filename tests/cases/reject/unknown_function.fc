@@ -1,0 +1,6 @@
+int main()
+{
+    return missing(1);
+}
+
+//! error: FC3001 3:12 unknown name 'missing'

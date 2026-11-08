@@ -1,0 +1,44 @@
+// Source names that collide with FSharp.Core functions or .NET namespaces used by the generated code.
+// The runtime prelude is defined before any user code, so these cannot break print/ignore/not or the entry point.
+int ignore(int x)
+{
+    return x + 1000;
+}
+
+int string(int array)
+{
+    return array * 2;
+}
+
+bool not(bool printfn)
+{
+    return printfn;
+}
+
+int System(int Console)
+{
+    return Console - 1;
+}
+
+int main()
+{
+    ignore(1);
+    string(2);
+    print(ignore(1));
+    print(string(21));
+    print(!not(false) ? 1 : 0);
+    print(System(10));
+    print(5 - -1);
+    print(-System(3));
+    print(!(1 > 2) && !!true ? 7 : 8);
+    return 0;
+}
+
+//! out: 1001
+//! out: 42
+//! out: 1
+//! out: 9
+//! out: 6
+//! out: -2
+//! out: 7
+//! fs-contains: fc'ignore (ignore 1)

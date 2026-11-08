@@ -1,0 +1,11 @@
+bool positive(int n)
+{
+    return n;
+}
+
+int main()
+{
+    return positive(1) ? 0 : 1;
+}
+
+//! error: FC3007 3:12 function 'positive' returns bool but this expression has type int

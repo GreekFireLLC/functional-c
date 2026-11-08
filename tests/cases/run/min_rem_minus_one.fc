@@ -1,0 +1,14 @@
+// -2147483648 % -1 also throws System.OverflowException on .NET (mathematically it is 0).
+int minusOne()
+{
+    return -1;
+}
+
+int main()
+{
+    print(-2147483648 % minusOne());
+    return 0;
+}
+
+//! exit: nonzero
+//! stderr-contains: System.OverflowException

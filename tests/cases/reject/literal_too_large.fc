@@ -1,0 +1,7 @@
+int main()
+{
+    print(2147483648);
+    return 0;
+}
+
+//! error: FC1003 3:11 out of range

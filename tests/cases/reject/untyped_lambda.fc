@@ -1,0 +1,7 @@
+int main()
+{
+    let f = (x) => x + 1;
+    return f(1);
+}
+
+//! error: FC2001 3:13 lambda parameters must have explicit types

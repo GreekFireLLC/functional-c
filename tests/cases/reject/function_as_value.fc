@@ -1,0 +1,12 @@
+int seven()
+{
+    return 7;
+}
+
+int main()
+{
+    let g = seven;
+    return 0;
+}
+
+//! error: FC3009 8:13 'seven' is a function; it can only be called

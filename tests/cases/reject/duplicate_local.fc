@@ -1,0 +1,8 @@
+int main()
+{
+    let a = 1;
+    let a = 2;
+    return a;
+}
+
+//! error: FC3003 4:9 'a' is already defined

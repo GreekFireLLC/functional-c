@@ -1,0 +1,8 @@
+int main()
+{
+    let x = 1;
+    let f = (int x) => x + 1;
+    return f(x);
+}
+
+//! error: FC3003 4:18 'x' is already defined

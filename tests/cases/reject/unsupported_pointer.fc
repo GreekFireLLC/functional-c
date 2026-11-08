@@ -1,0 +1,7 @@
+int main()
+{
+    int* p = 0;
+    return 0;
+}
+
+//! error: FC2002 3:8 pointers are not supported

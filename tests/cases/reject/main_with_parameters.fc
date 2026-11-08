@@ -1,0 +1,6 @@
+int main(int argc)
+{
+    return argc;
+}
+
+//! error: FC3006 1:14 'main' must not take parameters

@@ -1,0 +1,8 @@
+int main()
+{
+    return 1;
+    print(2);
+    return 0;
+}
+
+//! error: FC3005 3:5 'return' must be the last statement

@@ -1,0 +1,15 @@
+// explode() would throw DivideByZeroException; it must never run.
+int explode()
+{
+    return 1 / 0;
+}
+
+int main()
+{
+    print(true ? 7 : explode());
+    print(false ? explode() : 8);
+    return 0;
+}
+
+//! out: 7
+//! out: 8

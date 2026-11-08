@@ -1,0 +1,8 @@
+// -2147483648 is only accepted when the minus is directly in front of the digits.
+int main()
+{
+    print(-(2147483648));
+    return 0;
+}
+
+//! error: FC1003 4:13 out of range

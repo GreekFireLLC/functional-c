@@ -1,0 +1,13 @@
+int sumSquares(int n)
+{
+    let square = (int x) => x * x;
+    return n <= 0 ? 0 : square(n) + sumSquares(n - 1);
+}
+
+int main()
+{
+    print(sumSquares(0));
+    return 0;
+}
+
+//! out: 0

@@ -1,0 +1,7 @@
+int main()
+{
+    let x = 1.5;
+    return 0;
+}
+
+//! error: FC1004 3:13 floating-point literals are not supported

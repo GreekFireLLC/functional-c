@@ -1,0 +1,11 @@
+int first(int *values)
+{
+    return 0;
+}
+
+int main()
+{
+    return 0;
+}
+
+//! error: FC2002 1:15 pointers are not supported

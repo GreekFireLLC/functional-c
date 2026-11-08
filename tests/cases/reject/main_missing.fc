@@ -1,0 +1,6 @@
+int helper()
+{
+    return 0;
+}
+
+//! error: FC3006 1:1 no 'main' function was found

@@ -1,0 +1,16 @@
+bool isEven(int n)
+{
+    return n == 0 ? true : isOdd(n - 1);
+}
+
+bool isOdd(int n)
+{
+    return n == 0 ? false : isEven(n - 1);
+}
+
+int main()
+{
+    return isEven(4) ? 0 : 1;
+}
+
+//! error: FC3004 3:28 mutual recursion

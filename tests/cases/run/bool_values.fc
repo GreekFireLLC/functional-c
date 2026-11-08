@@ -1,0 +1,34 @@
+bool isEven(int n)
+{
+    return n % 2 == 0;
+}
+
+bool xor(bool a, bool b)
+{
+    return a != b;
+}
+
+int toInt(bool b)
+{
+    return b ? 1 : 0;
+}
+
+int main()
+{
+    let flag = isEven(10);
+    let same = flag == true;
+    print(toInt(flag));
+    print(toInt(isEven(7)));
+    print(toInt(xor(true, false)));
+    print(toInt(xor(same, flag)));
+    print(toInt(!flag || isEven(3)));
+    print(toInt(3 >= 3 && 2 < 3 && 4 > 5 == false && 1 <= 0 == false));
+    return 0;
+}
+
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 0
+//! out: 1

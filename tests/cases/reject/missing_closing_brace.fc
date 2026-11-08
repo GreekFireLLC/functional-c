@@ -1,0 +1,12 @@
+int sumSquares(int n)
+{
+    let square = (int x) => x * x;
+    return n <= 0 ? 0 : square(n) + sumSquares(n - 1);
+
+int main()
+{
+    print(sumSquares(5));
+    return 0;
+}
+
+//! error: FC2001 6:1 missing '}' to close the body of 'sumSquares' (opened at 2:1)

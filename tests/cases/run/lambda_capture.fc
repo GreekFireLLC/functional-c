@@ -1,0 +1,9 @@
+int main()
+{
+    let offset = 10;
+    let add = (int x) => x + offset;
+    print(add(7));
+    return 0;
+}
+
+//! out: 17

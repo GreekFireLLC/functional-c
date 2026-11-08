@@ -1,0 +1,27 @@
+// Discarded calls of every kind: bool-returning function, lambda, recursive function.
+bool report(int x)
+{
+    print(x);
+    return x > 0;
+}
+
+int countdown(int n)
+{
+    print(n);
+    return n <= 1 ? 0 : countdown(n - 1);
+}
+
+int main()
+{
+    report(5);
+    let shout = (int x) => report(x * 10);
+    shout(3);
+    countdown(3);
+    return 0;
+}
+
+//! out: 5
+//! out: 30
+//! out: 3
+//! out: 2
+//! out: 1

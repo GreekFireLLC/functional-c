@@ -1,0 +1,6 @@
+int main()
+{
+    print(1);
+}
+
+//! error: FC3005 4:1 must end with 'return <expression>;'

@@ -1,0 +1,7 @@
+int main()
+{
+    1 + 2;
+    return 0;
+}
+
+//! error: FC3011 3:5 only calls can be used as statements

@@ -1,0 +1,12 @@
+int f(int n)
+{
+    n = n + 1;
+    return n;
+}
+
+int main()
+{
+    return f(1);
+}
+
+//! error: FC3002 3:5 cannot assign to 'n'

@@ -1,0 +1,7 @@
+int main()
+{
+    print(true);
+    return 0;
+}
+
+//! error: FC3007 3:11 'print' expects an int argument

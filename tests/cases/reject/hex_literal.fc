@@ -1,0 +1,7 @@
+int main()
+{
+    let x = 0x1F;
+    return 0;
+}
+
+//! error: FC1004 3:13 hexadecimal literals are not supported

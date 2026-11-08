@@ -1,0 +1,7 @@
+int main()
+{
+    let values = [1, 2, 3];
+    return 0;
+}
+
+//! error: FC1005 3:18 arrays

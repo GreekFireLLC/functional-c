@@ -1,0 +1,8 @@
+int main()
+{
+    let a = 1;
+    print(a + b);
+    return 0;
+}
+
+//! error: FC3001 4:15 unknown name 'b'

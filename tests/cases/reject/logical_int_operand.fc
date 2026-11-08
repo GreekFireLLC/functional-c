@@ -1,0 +1,7 @@
+int main()
+{
+    print(1 && true ? 1 : 0);
+    return 0;
+}
+
+//! error: FC3007 3:13 operator '&&' expects bool operands but the left operand has type int

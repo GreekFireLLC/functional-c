@@ -1,0 +1,17 @@
+int sumSquares(int n)
+{
+    // Immutable binding to a lambda function.
+    let square = (int x) => x * x;
+
+    return n <= 0
+        ? 0
+        : square(n) + sumSquares(n - 1);
+}
+
+int main()
+{
+    let result = sumSquares(5);
+
+    print(result);  // Expected output: 55
+    return 0;
+}

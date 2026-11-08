@@ -1,0 +1,7 @@
+int main()
+{
+    let print = 1;
+    return 0;
+}
+
+//! error: FC3012 3:9 'print' is a built-in function

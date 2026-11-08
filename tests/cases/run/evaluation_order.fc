@@ -1,0 +1,44 @@
+// Arguments and operands are evaluated left to right.
+int mark(int x)
+{
+    print(x);
+    return x;
+}
+
+int add(int a, int b)
+{
+    return a + b;
+}
+
+int add3(int a, int b, int c)
+{
+    return a + b + c;
+}
+
+int main()
+{
+    print(add(mark(1), mark(2)));
+    print(mark(4) + mark(5) * mark(6));
+    print(add3(mark(7), 8, mark(9)));
+    print(mark(10) < mark(11) ? 1 : 0);
+    let sub = (int a, int b) => a - b;
+    print(sub(mark(20), mark(5)));
+    return 0;
+}
+
+//! out: 1
+//! out: 2
+//! out: 3
+//! out: 4
+//! out: 5
+//! out: 6
+//! out: 34
+//! out: 7
+//! out: 9
+//! out: 24
+//! out: 10
+//! out: 11
+//! out: 1
+//! out: 20
+//! out: 5
+//! out: 15

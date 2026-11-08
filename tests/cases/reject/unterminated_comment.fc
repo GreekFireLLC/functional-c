@@ -1,0 +1,7 @@
+int main()
+{
+    /* never closed
+    return 0;
+}
+
+//! error: FC1002 3:5 unterminated block comment

@@ -1,0 +1,11 @@
+int add(int a, int b)
+{
+    return a + b;
+}
+
+int main()
+{
+    return add(1);
+}
+
+//! error: FC3008 8:12 'add' expects 2 argument(s) but was given 1

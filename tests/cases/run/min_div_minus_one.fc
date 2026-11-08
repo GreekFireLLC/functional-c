@@ -1,0 +1,14 @@
+// -2147483648 / -1 does not fit in 32 bits; .NET throws System.OverflowException.
+int minusOne()
+{
+    return -1;
+}
+
+int main()
+{
+    print(-2147483648 / minusOne());
+    return 0;
+}
+
+//! exit: nonzero
+//! stderr-contains: System.OverflowException

@@ -272,7 +272,7 @@ public sealed class FSharpEmitter
                 case IfStmt branch when Flow.ContainsReturn(branch):
                 {
                     TailBranches(branch, rest, out var thenList, out var elseList);
-                    lines.Add($"if {EmitExpression(branch.Condition)} then");
+                    lines.Add($"if {EmitCondition(branch.Condition)} then");
                     lines.AddRange(Indented(TailBlock(thenList)));
                     var elseLines = TailBlock(elseList);
                     if (elseList[0] is IfStmt nested && Flow.ContainsReturn(nested))
@@ -406,7 +406,7 @@ public sealed class FSharpEmitter
 
     private List<string> EmitIf(IfStmt branch, Context context)
     {
-        var lines = new List<string> { $"if {EmitExpression(branch.Condition)} then" };
+        var lines = new List<string> { $"if {EmitCondition(branch.Condition)} then" };
         lines.AddRange(Indented(UnitBlock(Flow.Flatten(branch.Then), context)));
         if (branch.Else is IfStmt elseIf)
         {
@@ -425,7 +425,8 @@ public sealed class FSharpEmitter
 
     /// <summary>
     /// The loop test: exit flags first (so the source condition is not evaluated after a break or return),
-    /// then the source condition. A literal 'true' (or a missing 'for' condition) is dropped when flags exist.
+    /// then the source condition. An always-true condition ('true', a nonzero int literal, or a missing 'for'
+    /// condition) is dropped when flags exist.
     /// </summary>
     private string LoopCondition(LoopFlags flags, LoopStmt loop, Context context, Expr? condition)
     {
@@ -442,7 +443,7 @@ public sealed class FSharpEmitter
 
         if (!Flow.IsAlwaysTrue(condition) || parts.Count == 0)
         {
-            parts.Add(condition is null ? "true" : EmitExpression(condition));
+            parts.Add(condition is null ? "true" : EmitCondition(condition));
         }
 
         return string.Join(" && ", parts);
@@ -547,13 +548,25 @@ public sealed class FSharpEmitter
         BoolLiteralExpr boolean => boolean.Value ? "true" : "false",
         NameExpr name => name.Symbol!.FSharpName,
         UnaryExpr { Op: UnaryOp.Negate } unary => $"(-{EmitExpression(unary.Operand)})",
+        UnaryExpr { Op: UnaryOp.Not, Operand.Type: FcType.Int } unary => $"({EmitExpression(unary.Operand)} = 0)", // C: !n
         UnaryExpr { Op: UnaryOp.Not } unary => $"({FSharpNames.Not} {EmitExpression(unary.Operand)})",
         BinaryExpr binary => EmitBinary(binary),
         ConditionalExpr conditional =>
-            $"(if {EmitExpression(conditional.Condition)} then {EmitExpression(conditional.WhenTrue)} else {EmitExpression(conditional.WhenFalse)})",
+            $"(if {EmitCondition(conditional.Condition)} then {EmitExpression(conditional.WhenTrue)} else {EmitExpression(conditional.WhenFalse)})",
         CallExpr call => EmitCall(call),
         LambdaExpr lambda => $"(fun{ParameterList(lambda.Parameters)} -> {EmitExpression(lambda.Body)})",
         _ => throw new InvalidOperationException($"unexpected expression node {expression.GetType().Name}"),
+    };
+
+    /// <summary>
+    /// An expression used as a truth value (a condition, or an operand of &amp;&amp; or ||). A C-style int becomes an
+    /// explicit comparison with 0, since F# has no int-to-bool conversion; an int literal becomes true or false.
+    /// </summary>
+    private string EmitCondition(Expr condition) => condition switch
+    {
+        { Type: not FcType.Int } => EmitExpression(condition),
+        IntLiteralExpr literal => literal.Value != 0 ? "true" : "false",
+        _ => $"({EmitExpression(condition)} <> 0)",
     };
 
     private string NewTemp() => FSharpNames.TempPrefix + (++_tempCounter).ToString(CultureInfo.InvariantCulture);
@@ -575,8 +588,8 @@ public sealed class FSharpEmitter
         string op = FSharpOperator(binary.Op);
         bool shortCircuit = binary.Op is BinaryOp.And or BinaryOp.Or;
         string? temp = !shortCircuit && MayHaveEffects(binary.Left) && MayHaveEffects(binary.Right) ? NewTemp() : null;
-        string left = EmitExpression(binary.Left);
-        string right = EmitExpression(binary.Right);
+        string left = shortCircuit ? EmitCondition(binary.Left) : EmitExpression(binary.Left);
+        string right = shortCircuit ? EmitCondition(binary.Right) : EmitExpression(binary.Right);
         return temp is null
             ? $"({left} {op} {right})"
             : $"(let {temp} = {left} in ({temp} {op} {right}))";

@@ -1,0 +1,120 @@
+// C-style conditions: an int is true when it is not 0. This applies to the conditions of
+// if, while, do, for and ?:, and to the operands of !, && and ||, which still short-circuit.
+
+int mark(int x)
+{
+    print(x);
+    return x;
+}
+
+// while (b) is the classic C form of Euclid's algorithm.
+int gcd(int a, int b)
+{
+    while (b) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    return a;
+}
+
+// while (1) never ends on its own, so no return is needed after it.
+int firstSquareAbove(int n)
+{
+    int k = 0;
+    while (1) {
+        if (k * k > n) return k;
+        k++;
+    }
+}
+
+int countDown(int n)
+{
+    int steps = 0;
+    do {
+        steps++;
+        n--;
+    } while (n);
+    return steps;
+}
+
+int truth(int n)
+{
+    return n ? 1 : 0;
+}
+
+int main()
+{
+    // if: nonzero (including negative) is true, 0 is false
+    if (5) print(1);
+    if (0) print(-1); else print(2);
+    if (-3) print(3);
+    int zero = 0;
+    if (!zero) print(4);
+    if (!7) print(-1); else print(5);
+
+    // ?:
+    print(truth(42));             // 1
+    print(truth(0));              // 0
+    print(truth(-1));             // 1
+
+    // && and || with int operands, also mixed with bool
+    print(2 && 3 ? 1 : 0);        // 1
+    print(2 && 0 ? 1 : 0);        // 0
+    print(0 || -4 ? 1 : 0);       // 1
+    print(0 || false ? 1 : 0);    // 0
+    print(!!9 ? 1 : 0);           // 1
+    if (zero && mark(100)) print(-1);   // mark is not called
+    if (1 || mark(200)) print(6);       // mark is not called
+    if (mark(7) && mark(8)) print(9);   // 7 8 9
+
+    // loops
+    print(gcd(1071, 462));        // 21
+    print(firstSquareAbove(50));  // 8
+    print(countDown(3));          // 3
+
+    int n = 3, total = 0;
+    for (; n; n--) total += n;
+    print(total);                 // 6
+
+    int spins = 0;
+    for (;1;) {
+        spins++;
+        if (spins == 4) break;
+    }
+    print(spins);                 // 4
+
+    int odd = 0;
+    for (int i = 0; i < 10; i++) {
+        if (i % 2) odd++;
+    }
+    print(odd);                   // 5
+    return 0;
+}
+
+//! out: 1
+//! out: 2
+//! out: 3
+//! out: 4
+//! out: 5
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 6
+//! out: 7
+//! out: 8
+//! out: 9
+//! out: 21
+//! out: 8
+//! out: 3
+//! out: 6
+//! out: 4
+//! out: 5
+//! fs-contains: while (b <> 0) do
+//! fs-contains: if (zero = 0) then
+//! fs-contains: (if (n <> 0) then 1 else 0)

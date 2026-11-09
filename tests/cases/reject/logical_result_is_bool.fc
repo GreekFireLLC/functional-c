@@ -1,0 +1,9 @@
+// '!', '&&' and '||' accept ints as in C, but their result is bool, not C's int 0 or 1.
+int main()
+{
+    int n = 4;
+    int isZero = !n;
+    return 0;
+}
+
+//! error: FC3007 5:18 cannot initialize the int variable 'isZero' with a value of type bool

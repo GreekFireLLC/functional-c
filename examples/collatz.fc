@@ -1,0 +1,52 @@
+// Collatz sequences: halve n when it is even, replace it with 3n + 1 when it is odd,
+// and stop on reaching 1. Nobody has proved that every start reaches 1.
+
+int collatzSteps(int n)
+{
+    int steps = 0;
+    while (n != 1) {
+        n = n % 2 == 0 ? n / 2 : 3 * n + 1;
+        steps++;
+    }
+    return steps;
+}
+
+// The largest value the sequence reaches.
+int collatzPeak(int n)
+{
+    int peak = n;
+    while (n != 1) {
+        if (n % 2 == 0) n /= 2; else n = 3 * n + 1;
+        if (n > peak) peak = n;
+    }
+    return peak;
+}
+
+int main()
+{
+    print(collatzSteps(1));   // 0
+    print(collatzSteps(6));   // 8: 6 3 10 5 16 8 4 2 1
+    print(collatzSteps(27));  // 111
+    print(collatzPeak(27));   // 9232
+
+    // The start below 10000 with the longest sequence.
+    int best = 1, bestSteps = 0;
+    for (int n = 1; n < 10000; n++) {
+        int s = collatzSteps(n);
+        if (s > bestSteps) {
+            best = n;
+            bestSteps = s;
+        }
+    }
+    print(best);              // 6171
+    print(bestSteps);         // 261
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 0
+//! out: 8
+//! out: 111
+//! out: 9232
+//! out: 6171
+//! out: 261

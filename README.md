@@ -1,4 +1,4 @@
-# Functional C (prototype, version 1)
+# Functional C (prototype, version 1.1)
 
 Functional C is a small language with C syntax and functional features: immutable `let` bindings and
 lambdas alongside C's typed variables, `if`/`else` and loops. Its translator turns a `.fc` file into
@@ -13,6 +13,8 @@ Version history:
 - **Version 0:** expressions, functions, immutable `let`, lambdas, `?:`.
 - **Version 1:** C-style mutable variables, assignment, `if`/`else`, `while`/`do`/`for`,
   `break`/`continue` and `return` anywhere.
+- **Version 1.1:** C-style conditions (`if (n)`, `while (1)`, `!n`, `a && b` with ints) and a set of
+  example programs.
 
 It is still **not** compatible with arbitrary C programs: there are no pointers, arrays, structures,
 strings, `switch`, headers or preprocessor.
@@ -30,8 +32,7 @@ strings, `switch`, headers or preprocessor.
 | Path | Contents |
 | --- | --- |
 | `src/FunctionalC.Compiler/` | The translator (C# console app): `Lexer.cs`, `Parser.cs`, `Ast.cs`, `Checker.cs`, `Flow.cs`, `FSharpEmitter.cs`, `Translator.cs`, `Cli.cs` |
-| `examples/sum_squares.fc` | The original sample (recursion, a lambda, `?:`) |
-| `examples/primes.fc` | Loops, `if`, early `return` and mutable variables |
+| `examples/*.fc` | Example programs (see [Examples](#examples)) |
 | `examples/sum_squares.reference.fs` | The hand-written F# from the handoff, kept for comparison. It is not translator output and not part of any project. |
 | `generated/SampleApp/` | F# console project. Its `Program.fs` is **generated** by the translator. |
 | `tests/FunctionalC.Tests/` | Acceptance-test harness (a plain C# console app, no test framework) |
@@ -53,16 +54,8 @@ dotnet run --no-build --project generated/SampleApp
 
 The last command prints `55` and the process exits with code 0.
 
-### Translating another file
-
-```text
-dotnet run --project src/FunctionalC.Compiler -- examples/primes.fc --out generated/SampleApp/Program.fs
-dotnet build generated/SampleApp/SampleApp.fsproj
-dotnet run --no-build --project generated/SampleApp
-```
-
-After the first build you can call the compiled translator directly:
-`src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.exe <input.fc> --out <output.fs>`
+To translate another file, see [Examples](#examples). After the first build you can call the compiled
+translator directly: `src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.exe <input.fc> --out <output.fs>`
 (on any OS: `dotnet src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.dll ...`).
 
 Translator exit codes:
@@ -78,7 +71,37 @@ The translator builds the whole F# file in memory and writes it only after every
 writes to a temporary file next to the target and then renames that file over the target, so a failed
 or interrupted translation never leaves a partial or corrupted `Program.fs`.
 
-### Running the tests
+## Examples
+
+Each file in `examples/` is a complete program. Except for the handoff's `sum_squares.fc`, each one ends
+with its expected output in `//! out:` lines. Those values were computed separately in Python, not copied
+from the translator's output. The test suite translates, compiles and runs every example and compares
+the output.
+
+| Program | What it computes | Shows |
+| --- | --- | --- |
+| `sum_squares.fc` | 1² + … + 5² = 55 | The handoff sample: recursion, a lambda, `?:` |
+| `primes.fc` | The primes below 50, and how many are below 1000 (168) | `for`, early `return`, `count++` |
+| `gcd_lcm.fc` | GCD of 1071 and 462, and the LCM of 1..20 (232792560) | Recursion vs. a loop, `while (b)` in C style |
+| `fibonacci.fc` | Fibonacci numbers, including fib(46), the largest that fits in an int | Naive recursion vs. a loop, a `bool` flag |
+| `collatz.fc` | Collatz sequence lengths and the longest one below 10000 | `while`, `?:`, `if`/`else` on one line, `n /= 2` |
+| `perfect_numbers.fc` | The perfect numbers up to 10000, an amicable pair, and how many abundant numbers there are up to 100 | Divisor sums, chained `?:` |
+| `digits.fc` | Digit sums, reversed numbers, digital roots, and palindromes below 10000 | `/` and `%` loops |
+| `integer_sqrt.fc` | Integer square roots up to `isqrt(2147483647)` = 46340 | Binary search that can't overflow |
+| `modular_power.fc` | `base^exponent mod m`, and the Fermat pseudoprimes 341, 561 and 645 | Square-and-multiply with a loop and with recursion |
+| `fizzbuzz_numbers.fc` | FizzBuzz, printing -3, -5 and -15 in place of the words | Early returns, `else if` chains |
+| `local_lambdas.fc` | Clamped squares, triangle numbers and sums of cubes | `let` lambdas calling each other and the enclosing function, copying a loop counter before capturing it |
+| `ackermann.fc` | Ackermann's function for m ≤ 3 and n ≤ 4 | Deep nested recursion |
+
+To run one, translate it into the sample project:
+
+```text
+dotnet run --project src/FunctionalC.Compiler -- examples/collatz.fc --out generated/SampleApp/Program.fs
+dotnet build generated/SampleApp/SampleApp.fsproj
+dotnet run --no-build --project generated/SampleApp
+```
+
+## Running the tests
 
 ```text
 dotnet run --project tests/FunctionalC.Tests
@@ -141,6 +164,7 @@ int main()
 | Lambdas | `(int x) => expr`, `(int a, bool b) => expr`, `() => expr`. A lambda can capture enclosing `let` bindings, parameters and variables that are never assigned, call other lambdas in scope, and call the enclosing function. |
 | Calls | `f(a, b)` for functions and let-bound lambdas |
 | Operators | Unary `-` and `!`. Binary `* / %`, `+ -`, `< <= > >=`, `== !=`, `&&`, `\|\|`, and `?:` |
+| Truth values | As in C, an `int` used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. These operators still produce a `bool`, not C's `int` 0 or 1. |
 | `if` | `if (c) stmt`, `if (c) stmt else stmt`, `else if` chains. Braces are optional, and a dangling `else` binds to the nearest `if`. |
 | Loops | `while (c) stmt`, `do stmt while (c);`, `for (init; cond; update) stmt`. The `for` initializer can be declarations (`int i = 0, j = 10`) or assignments, the update can be several statements separated by commas, and any part can be empty (`for (;;)`). |
 | Jumps | `break;` and `continue;` (innermost loop), and `return expr;` anywhere |
@@ -172,10 +196,14 @@ Assignment and `++`/`--` aren't in this table because they are statements, not o
 The translator checks these rules itself:
 
 - Arithmetic and relational operators take `int` operands.
-- `&&`, `||` and `!` take `bool` operands.
-- `==` and `!=` need both operands to have the same type.
-- Conditions of `?:`, `if`, `while`, `do` and `for` must be `bool`. There is **no implicit int-to-bool
-  conversion**, so `while (1)` and `if (n)` are rejected. Write `while (true)` and `if (n != 0)`.
+- **Truth values.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands of `&&`,
+  `||` and `!`, may be `bool` or `int`. An `int` is true when it is not 0, as in C, so `while (1)`,
+  `if (n)`, `if (!n)` and `if (n % 2 && ok)` all work. `&&`, `||`, `!` and the comparisons always produce
+  `bool`.
+- **No conversion anywhere else.** An `int` isn't converted to `bool` when it is stored, passed or
+  returned (`bool b = 1;` is rejected; write `bool b = true;` or `bool b = n != 0;`). A `bool` is never
+  converted to `int` (`int isZero = !n;` is rejected; write `!n ? 1 : 0`).
+- `==` and `!=` need both operands to have the same type, so `n == true` is rejected.
 - Both branches of `?:` must have the same type.
 - An assigned or initialized value must match the variable's type. `+= -= *= /= %=` and `++`/`--` need
   `int`.
@@ -204,8 +232,9 @@ The translator checks these rules itself:
 ### Control-flow rules
 
 - Every path through a function must end in `return`. Falling off the end is an error, not C's
-  undefined behavior. A loop like `while (true)` or `for (;;)` with no `break` never finishes, so the
-  checker doesn't require a `return` after it.
+  undefined behavior. A loop like `while (true)`, `while (1)` or `for (;;)` with no `break` never
+  finishes, so the checker doesn't require a `return` after it. Only a literal counts as always true:
+  the checker doesn't evaluate other constant expressions such as `while (2 > 1)`.
 - Code that can never run, such as a statement after `return`, `break` or `continue`, or after an
   infinite loop, is an **error**.
 - `break` and `continue` must be inside a loop and apply to the innermost one. In a `for` loop,
@@ -268,6 +297,7 @@ matching operator.
 | `(int x) => e`, `() => e` | `(fun (x: int) -> e)`, `(fun () -> e)` |
 | `c ? a : b` | `(if c then a else b)` |
 | `==`, `!=`, `!x` | `=`, `<>`, `(fc'not x)` |
+| an `int` used as a truth value: `if (n)`, `!n`, `n && m` | `if (n <> 0) then`, `(n = 0)`, `((n <> 0) && (m <> 0))`. A literal becomes `true` or `false`, so `while (1)` becomes `while true do`. |
 | `f(x);` (call statement) | `fc'ignore (f x)` |
 | `print(e);` | `fc'print e` |
 | `int main()` | an ordinary `let main () : int =` plus a separate `[<EntryPoint>] let fc'entry (_args: string array) : int = main ()` |
@@ -347,7 +377,7 @@ tests/cases/reject/immutable_reassign.fc(4,5): error FC3002: cannot assign to 'x
 | FC3004 | Forward reference or mutual recursion |
 | FC3005 | A function can reach its end without returning a value |
 | FC3006 | Entry point: `main` missing, duplicated, not `int`, or has parameters |
-| FC3007 | Type mismatch, including non-`bool` conditions |
+| FC3007 | Type mismatch |
 | FC3008 | Wrong number of arguments |
 | FC3009 / FC3010 | A function used as a value / a value called as a function |
 | FC3011 | An expression statement that isn't a call, assignment or increment |
@@ -373,6 +403,9 @@ the `.fc` source. That would mean a translator bug, so please keep the `.fc` inp
   `while ((c = next()) != 0)` and `a[i++]`-style code isn't supported. The comma is allowed only between
   declarators and in a `for` header.
 - Variables must be initialized when declared.
+- `bool` and `int` convert only where C needs a truth value (see [Typing rules](#typing-rules)). So
+  `bool b = 1;`, `int isZero = !n;` and returning `a < b` from an `int` function are rejected, even
+  though C accepts them.
 - No forward references or mutual recursion; a function can only call functions defined above it.
 - No shadowing, recursive lambdas, or first-class functions (you can't pass or return a function). A
   lambda can't capture a variable that is assigned.
@@ -390,5 +423,6 @@ the `.fc` source. That would mean a translator bug, so please keep the `.fc` inp
 This folder was built afresh from the handoff document `Functional_C_Desktop_Handoff.md` one level up.
 An earlier conversation claimed that .NET SDK 8.0.415, a translator and test runs existed. None of those
 were available or verifiable, and none of that work is reused here. Version 1 then added C-style
-mutable variables, `if` and loops, keeping `let` immutable. The SDK, target framework and results
+mutable variables, `if` and loops, keeping `let` immutable. Version 1.1 added C-style int conditions
+and the example programs. The SDK, target framework and results
 recorded in `TEST-RESULTS.md` come from actual runs on this machine.

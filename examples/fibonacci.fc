@@ -1,0 +1,50 @@
+// Fibonacci numbers written as naive recursion and as a loop, plus a check that the two agree.
+
+int fibRecursive(int n)
+{
+    return n < 2 ? n : fibRecursive(n - 1) + fibRecursive(n - 2);
+}
+
+int fibLoop(int n)
+{
+    int a = 0, b = 1;
+    for (int i = 0; i < n; i++) {
+        int next = a + b; // on the last step of fibLoop(46) this wraps around, but it is never returned
+        a = b;
+        b = next;
+    }
+    return a;
+}
+
+int main()
+{
+    for (int n = 0; n <= 10; n++) {
+        print(fibLoop(n));          // 0 1 1 2 3 5 8 13 21 34 55
+    }
+
+    print(fibRecursive(25));        // 75025, after about 250,000 calls
+    print(fibLoop(46));             // 1836311903, the largest Fibonacci number that fits in an int
+
+    bool agree = true;
+    for (int n = 0; n <= 25; n++) {
+        if (fibRecursive(n) != fibLoop(n)) agree = false;
+    }
+    print(agree ? 1 : 0);           // 1
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 2
+//! out: 3
+//! out: 5
+//! out: 8
+//! out: 13
+//! out: 21
+//! out: 34
+//! out: 55
+//! out: 75025
+//! out: 1836311903
+//! out: 1

@@ -279,19 +279,15 @@ public sealed class Checker
         return false;
     }
 
-    private void CheckCondition(Expr condition, Scope scope, string construct)
-    {
-        var type = CheckExpression(condition, scope);
-        if (type is FcType.Int)
-        {
-            Error(Codes.TypeMismatch, condition.Location,
-                $"the condition of '{construct}' must be bool but has type int; there is no implicit int-to-bool conversion (compare explicitly, e.g. 'x != 0')");
-        }
-    }
+    /// <summary>
+    /// A condition may be bool or, as in C, int: an int condition is true when it is not 0.
+    /// (Those are the only two value types, so every well-typed expression is a valid condition.)
+    /// </summary>
+    private void CheckCondition(Expr condition, Scope scope) => CheckExpression(condition, scope);
 
     private bool CheckIf(IfStmt branch, Scope scope)
     {
-        CheckCondition(branch.Condition, scope, "if");
+        CheckCondition(branch.Condition, scope);
         bool thenCompletes = CheckStatement(branch.Then, new Scope(scope));
         bool elseCompletes = branch.Else is null || CheckStatement(branch.Else, new Scope(scope));
         return thenCompletes || elseCompletes;
@@ -307,7 +303,7 @@ public sealed class Checker
 
     private bool CheckWhile(WhileStmt loop, Scope scope)
     {
-        CheckCondition(loop.Condition, scope, "while");
+        CheckCondition(loop.Condition, scope);
         CheckLoopBody(loop, scope);
         return !Flow.IsAlwaysTrue(loop.Condition) || loop.UsesBreak;
     }
@@ -315,7 +311,7 @@ public sealed class Checker
     private bool CheckDoWhile(DoWhileStmt loop, Scope scope)
     {
         bool bodyCompletes = CheckLoopBody(loop, scope);
-        CheckCondition(loop.Condition, scope, "do ... while"); // body declarations are not visible here, as in C
+        CheckCondition(loop.Condition, scope); // body declarations are not visible here, as in C
         bool conditionReachable = bodyCompletes || loop.UsesContinue;
         return loop.UsesBreak || (conditionReachable && !Flow.IsAlwaysTrue(loop.Condition));
     }
@@ -330,7 +326,7 @@ public sealed class Checker
 
         if (loop.Condition is not null)
         {
-            CheckCondition(loop.Condition, loopScope, "for");
+            CheckCondition(loop.Condition, loopScope);
         }
 
         CheckLoopBody(loop, loopScope);
@@ -530,6 +526,13 @@ public sealed class Checker
     /// <summary>Returns the expression's type, or null if an error was reported (to avoid cascading errors).</summary>
     private FcType? CheckExpression(Expr expression, Scope scope)
     {
+        var type = CheckExpressionCore(expression, scope);
+        expression.Type = type;
+        return type;
+    }
+
+    private FcType? CheckExpressionCore(Expr expression, Scope scope)
+    {
         switch (expression)
         {
             case IntLiteralExpr:
@@ -566,18 +569,21 @@ public sealed class Checker
                 }
             }
 
+            case UnaryExpr { Op: UnaryOp.Not } negation:
+                // As in C, '!' accepts an int ('!n' is true when n is 0); the result is always bool.
+                CheckExpression(negation.Operand, scope);
+                return FcType.Bool;
+
             case UnaryExpr unary:
             {
-                var expected = unary.Op == UnaryOp.Negate ? FcType.Int : FcType.Bool;
                 var operand = CheckExpression(unary.Operand, scope);
-                if (operand is not null && operand != expected)
+                if (operand is not null && operand != FcType.Int)
                 {
                     Error(Codes.TypeMismatch, unary.Location,
-                        $"operator '{unary.Op.Source()}' expects a {expected.Name()} operand but got {operand.Name()}"
-                        + (expected == FcType.Bool ? "; there is no implicit int-to-bool conversion" : ""));
+                        $"operator '{unary.Op.Source()}' expects an int operand but got {operand.Name()}");
                 }
 
-                return expected;
+                return FcType.Int;
             }
 
             case BinaryExpr binary:
@@ -585,13 +591,7 @@ public sealed class Checker
 
             case ConditionalExpr conditional:
             {
-                var condition = CheckExpression(conditional.Condition, scope);
-                if (condition is FcType.Int)
-                {
-                    Error(Codes.TypeMismatch, conditional.Condition.Location,
-                        "the condition of '?:' must be bool but has type int; there is no implicit int-to-bool conversion (compare explicitly, e.g. 'x != 0')");
-                }
-
+                CheckCondition(conditional.Condition, scope);
                 var whenTrue = CheckExpression(conditional.WhenTrue, scope);
                 var whenFalse = CheckExpression(conditional.WhenFalse, scope);
                 if (whenTrue is not null && whenFalse is not null && whenTrue != whenFalse)
@@ -637,8 +637,7 @@ public sealed class Checker
             if (actual is not null && actual != expected)
             {
                 Error(Codes.TypeMismatch, binary.OperatorLocation,
-                    $"operator '{op}' expects {expected.Name()} operands but the {side} operand has type {actual.Name()}"
-                    + (expected == FcType.Bool ? "; there is no implicit int-to-bool conversion" : ""));
+                    $"operator '{op}' expects {expected.Name()} operands but the {side} operand has type {actual.Name()}");
             }
         }
 
@@ -664,8 +663,7 @@ public sealed class Checker
                 return FcType.Bool;
 
             case BinaryOp.And or BinaryOp.Or:
-                Require(FcType.Bool, left, "left");
-                Require(FcType.Bool, right, "right");
+                // As in C, each operand may be bool or int (an int is true when it is not 0); the result is bool.
                 return FcType.Bool;
 
             default:

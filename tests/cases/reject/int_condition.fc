@@ -1,8 +1,0 @@
-int main()
-{
-    let n = 3;
-    print(n ? 1 : 2);
-    return 0;
-}
-
-//! error: FC3007 4:11 the condition of '?:' must be bool

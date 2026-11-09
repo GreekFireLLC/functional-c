@@ -1,0 +1,9 @@
+// An int counts as true or false only where a truth value is expected (conditions and logical
+// operators); it is not converted when it is stored in a bool.
+int main()
+{
+    bool flag = 1;
+    return 0;
+}
+
+//! error: FC3007 5:17 cannot initialize the bool variable 'flag' with a value of type int

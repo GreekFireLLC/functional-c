@@ -142,13 +142,28 @@ internal static partial class Program
 
     private static IEnumerable<TestCase> DiscoverTests()
     {
+        // sum_squares.fc is the handoff's sample and is kept exactly as given, so its expectation lives here.
         yield return new TestCase("example: examples/sum_squares.fc prints 55", "end-to-end",
             () => RunProgramCase("examples/sum_squares.fc", "example-sum_squares",
                 new CaseSpec { Out = ["55"], Exit = "0" }));
 
-        yield return new TestCase("example: examples/primes.fc prints the primes below 50 and 168", "end-to-end",
-            () => RunProgramCase("examples/primes.fc", "example-primes",
-                new CaseSpec { Out = ["2", "3", "5", "7", "11", "13", "17", "19", "23", "29", "31", "37", "41", "43", "47", "168"], Exit = "0" }));
+        // Every other example lists its expected output in '//! out:' lines; one without them fails instead of passing vacuously.
+        foreach (var file in Directory.GetFiles(Path.Combine(_root, "examples"), "*.fc").Order(StringComparer.Ordinal))
+        {
+            string name = Path.GetFileNameWithoutExtension(file);
+            if (name == "sum_squares")
+            {
+                continue;
+            }
+
+            string relative = Relative(file);
+            yield return new TestCase($"example: {relative}", "end-to-end", async () =>
+            {
+                var spec = CaseSpec.Parse(File.ReadAllLines(file));
+                Assert(spec.Out.Count > 0, $"{relative} has no '//! out:' lines giving its expected output");
+                return await RunProgramCase(relative, "example-" + name, spec);
+            });
+        }
 
         foreach (var file in Directory.GetFiles(Path.Combine(_root, "tests", "cases", "run"), "*.fc").Order(StringComparer.Ordinal))
         {

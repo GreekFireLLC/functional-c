@@ -1,0 +1,45 @@
+// Greatest common divisor two ways (Euclid's algorithm as recursion and as a loop),
+// and the least common multiple built on it.
+
+int gcdRecursive(int a, int b)
+{
+    return b == 0 ? a : gcdRecursive(b, a % b);
+}
+
+int gcdLoop(int a, int b)
+{
+    while (b) { // C style: an int condition is true when it is not 0
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    return a;
+}
+
+int lcm(int a, int b)
+{
+    return a / gcdLoop(a, b) * b; // divide first so the product stays in range
+}
+
+int main()
+{
+    print(gcdRecursive(1071, 462)); // 21
+    print(gcdLoop(1071, 462));      // 21
+    print(gcdLoop(17, 5));          // 1: 17 and 5 are coprime
+    print(lcm(4, 6));               // 12
+
+    // The smallest number divisible by every number from 1 to 20.
+    int all = 1;
+    for (int k = 2; k <= 20; k++) {
+        all = lcm(all, k);
+    }
+    print(all);                     // 232792560
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 21
+//! out: 21
+//! out: 1
+//! out: 12
+//! out: 232792560

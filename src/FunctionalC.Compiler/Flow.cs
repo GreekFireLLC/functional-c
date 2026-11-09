@@ -35,6 +35,10 @@ public static class Flow
         _ => false,
     };
 
-    /// <summary>A loop condition written literally as 'true' (or omitted in 'for'), which never ends the loop.</summary>
-    public static bool IsAlwaysTrue(Expr? condition) => condition is null or BoolLiteralExpr { Value: true };
+    /// <summary>
+    /// A loop condition that never ends the loop: omitted (in 'for'), the literal 'true', or a nonzero
+    /// integer literal such as the C idiom 'while (1)'.
+    /// </summary>
+    public static bool IsAlwaysTrue(Expr? condition) =>
+        condition is null or BoolLiteralExpr { Value: true } or IntLiteralExpr { Value: not 0 };
 }

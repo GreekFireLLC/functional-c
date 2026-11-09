@@ -1,0 +1,43 @@
+// Lambdas bound with 'let' work as small local helper functions. They can use the enclosing
+// function's parameters and earlier bindings, call each other, and call the enclosing function.
+
+int clampedSquares(int low, int high)
+{
+    let clamp = (int x) => x < low ? low : x > high ? high : x;
+    let square = (int x) => x * x;
+    let clampedSquare = (int x) => square(clamp(x));
+    return clampedSquare(-7) + clampedSquare(3) + clampedSquare(50);
+}
+
+// A lambda may call the function it is defined in, which makes this recursive.
+int triangle(int n)
+{
+    let previous = () => triangle(n - 1);
+    return n == 0 ? 0 : n + previous();
+}
+
+// The loop counter i changes (i++), so a lambda cannot capture it.
+// Copying its current value into an immutable 'let' binding first makes the capture safe.
+int sumOfCubes(int n)
+{
+    int total = 0;
+    for (int i = 1; i <= n; i++) {
+        let k = i;
+        let cube = () => k * k * k;
+        total += cube();
+    }
+    return total;
+}
+
+int main()
+{
+    print(clampedSquares(1, 10)); // 1 + 9 + 100 = 110
+    print(triangle(10));          // 55
+    print(sumOfCubes(4));         // 1 + 8 + 27 + 64 = 100
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 110
+//! out: 55
+//! out: 100

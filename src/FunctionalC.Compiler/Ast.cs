@@ -66,6 +66,9 @@ public static class OperatorText
 public abstract class Expr(SourceLocation location)
 {
     public SourceLocation Location { get; } = location;
+
+    /// <summary>Set by the checker; null if the expression had an error. The emitter uses it for C-style int conditions.</summary>
+    public FcType? Type { get; set; }
 }
 
 public sealed class IntLiteralExpr(long value, SourceLocation location) : Expr(location)

@@ -1,0 +1,41 @@
+// Integer square root by binary search: the largest r with r * r <= n.
+
+int isqrt(int n)
+{
+    // 46340 * 46340 is the largest square that fits in an int, so the answer is never above it.
+    int low = 0, high = n < 46340 ? n : 46340;
+    while (low < high) {
+        int mid = low + (high - low + 1) / 2; // rounds up, so mid >= 1 and the loop always shrinks
+        if (mid <= n / mid) {                 // mid * mid <= n, written so it cannot overflow
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return low;
+}
+
+int main()
+{
+    print(isqrt(0));            // 0
+    print(isqrt(15));           // 3
+    print(isqrt(16));           // 4
+    print(isqrt(1000000));      // 1000
+    print(isqrt(2147483647));   // 46340
+
+    int squares = 0;
+    for (int n = 1; n <= 10000; n++) {
+        let r = isqrt(n);
+        if (r * r == n) squares++;
+    }
+    print(squares);             // 100 perfect squares from 1 to 10000
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 0
+//! out: 3
+//! out: 4
+//! out: 1000
+//! out: 46340
+//! out: 100

@@ -1,0 +1,46 @@
+// The Ackermann function: short to write and explosive to evaluate. It grows faster than any
+// function built from counted loops alone, so here it is plain recursion.
+
+int ackermann(int m, int n)
+{
+    if (m == 0) return n + 1;
+    if (n == 0) return ackermann(m - 1, 1);
+    return ackermann(m - 1, ackermann(m, n - 1));
+}
+
+int main()
+{
+    // One row per m from 0 to 3, each with n from 0 to 4.
+    for (int m = 0; m <= 3; m++) {
+        for (int n = 0; n <= 4; n++) {
+            print(ackermann(m, n));
+        }
+    }
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+// m = 0: n + 1
+//! out: 1
+//! out: 2
+//! out: 3
+//! out: 4
+//! out: 5
+// m = 1: n + 2
+//! out: 2
+//! out: 3
+//! out: 4
+//! out: 5
+//! out: 6
+// m = 2: 2n + 3
+//! out: 3
+//! out: 5
+//! out: 7
+//! out: 9
+//! out: 11
+// m = 3: 2^(n+3) - 3
+//! out: 5
+//! out: 13
+//! out: 29
+//! out: 61
+//! out: 125

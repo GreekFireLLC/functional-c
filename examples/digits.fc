@@ -1,0 +1,58 @@
+// Taking numbers apart digit by digit with / and %.
+
+int digitSum(int n)
+{
+    int sum = 0;
+    while (n > 0) {
+        sum += n % 10;
+        n /= 10;
+    }
+    return sum;
+}
+
+int reverseDigits(int n)
+{
+    int reversed = 0;
+    while (n > 0) {
+        reversed = reversed * 10 + n % 10;
+        n /= 10;
+    }
+    return reversed;
+}
+
+bool isPalindrome(int n)
+{
+    return n == reverseDigits(n);
+}
+
+// Repeat the digit sum until a single digit is left.
+int digitalRoot(int n)
+{
+    while (n >= 10) {
+        n = digitSum(n);
+    }
+    return n;
+}
+
+int main()
+{
+    print(digitSum(2026));                // 10
+    print(reverseDigits(12345));          // 54321
+    print(digitalRoot(987654321));        // 9: 45, then 9
+
+    int palindromes = 0;
+    for (int n = 1; n < 10000; n++) {
+        if (isPalindrome(n)) palindromes++;
+    }
+    print(palindromes);                   // 198 = 9 + 9 + 90 + 90
+
+    print(isPalindrome(12321) ? 1 : 0);   // 1
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 10
+//! out: 54321
+//! out: 9
+//! out: 198
+//! out: 1

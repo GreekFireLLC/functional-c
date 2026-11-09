@@ -1,0 +1,50 @@
+// FizzBuzz without strings: a multiple of 15 prints -15 ("FizzBuzz"), of 3 prints -3 ("Fizz"),
+// of 5 prints -5 ("Buzz"), and every other number prints itself.
+
+int fizzBuzz(int n)
+{
+    if (n % 15 == 0) return -15;
+    if (n % 3 == 0) return -3;
+    if (n % 5 == 0) return -5;
+    return n;
+}
+
+int main()
+{
+    for (int n = 1; n <= 15; n++) {
+        print(fizzBuzz(n));
+    }
+
+    // How many Fizz, Buzz and FizzBuzz there are from 1 to 100.
+    int fizz = 0, buzz = 0, both = 0;
+    for (int n = 1; n <= 100; n++) {
+        let code = fizzBuzz(n);
+        if (code == -15) both++;
+        else if (code == -3) fizz++;
+        else if (code == -5) buzz++;
+    }
+    print(fizz);   // 27
+    print(buzz);   // 14
+    print(both);   // 6
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 1
+//! out: 2
+//! out: -3
+//! out: 4
+//! out: -5
+//! out: -3
+//! out: 7
+//! out: 8
+//! out: -3
+//! out: -5
+//! out: 11
+//! out: -3
+//! out: 13
+//! out: 14
+//! out: -15
+//! out: 27
+//! out: 14
+//! out: 6

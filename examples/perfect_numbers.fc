@@ -1,0 +1,49 @@
+// Perfect numbers equal the sum of their proper divisors (6 = 1 + 2 + 3).
+// Abundant numbers have a larger sum and deficient numbers a smaller one.
+
+int sumProperDivisors(int n)
+{
+    if (n < 2) return 0;
+    int sum = 1;
+    for (int d = 2; d * d <= n; d++) {
+        if (n % d == 0) {
+            sum += d;
+            int other = n / d;
+            if (other != d) sum += other; // count the divisor pair d, n / d only once for squares
+        }
+    }
+    return sum;
+}
+
+// -1 for deficient, 0 for perfect, 1 for abundant.
+int classify(int n)
+{
+    let s = sumProperDivisors(n);
+    return s < n ? -1 : s == n ? 0 : 1;
+}
+
+int main()
+{
+    for (int n = 1; n <= 10000; n++) {
+        if (classify(n) == 0) print(n);   // 6 28 496 8128
+    }
+
+    print(sumProperDivisors(220));        // 284
+    print(sumProperDivisors(284));        // 220: 220 and 284 are an amicable pair
+
+    int abundant = 0;
+    for (int n = 1; n <= 100; n++) {
+        if (classify(n) == 1) abundant++;
+    }
+    print(abundant);                      // 22 abundant numbers up to 100
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 6
+//! out: 28
+//! out: 496
+//! out: 8128
+//! out: 284
+//! out: 220
+//! out: 22

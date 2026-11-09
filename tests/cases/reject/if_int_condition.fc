@@ -1,0 +1,10 @@
+int main()
+{
+    int n = 3;
+    if (n) {
+        print(n);
+    }
+    return 0;
+}
+
+//! error: FC3007 4:9 the condition of 'if' must be bool

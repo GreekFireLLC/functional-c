@@ -1,0 +1,13 @@
+int f(int n)
+{
+    let twice = () => n * 2;
+    n = n + 1;
+    return twice();
+}
+
+int main()
+{
+    return f(1);
+}
+
+//! error: FC3017 3:23 a lambda cannot capture 'n'

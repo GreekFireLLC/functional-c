@@ -1,0 +1,41 @@
+int main()
+{
+    // The body runs once even though the condition is false from the start.
+    int n = 10;
+    do {
+        print(n);
+    } while (n < 5);
+
+    // Counting down.
+    int i = 3;
+    do {
+        print(i);
+        i--;
+    } while (i > 0);
+
+    // continue jumps to the condition check.
+    int j = 0;
+    do {
+        j++;
+        if (j % 2 == 0) continue;
+        print(j);
+    } while (j < 5);
+
+    // break leaves immediately, without evaluating the condition.
+    int k = 0;
+    do {
+        k++;
+        if (k == 2) break;
+    } while (true);
+    print(k);
+    return 0;
+}
+
+//! out: 10
+//! out: 3
+//! out: 2
+//! out: 1
+//! out: 1
+//! out: 3
+//! out: 5
+//! out: 2

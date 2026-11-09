@@ -15,6 +15,13 @@ public enum TokenKind
     KwReturn,
     KwTrue,
     KwFalse,
+    KwIf,
+    KwElse,
+    KwWhile,
+    KwFor,
+    KwDo,
+    KwBreak,
+    KwContinue,
 
     LParen,
     RParen,
@@ -41,6 +48,14 @@ public enum TokenKind
     AmpAmp,
     PipePipe,
     Bang,
+
+    PlusPlus,       // ++
+    MinusMinus,     // --
+    PlusAssign,     // +=
+    MinusAssign,    // -=
+    StarAssign,     // *=
+    SlashAssign,    // /=
+    PercentAssign,  // %=
 
     EndOfFile,
 }
@@ -79,12 +94,19 @@ public sealed class Lexer
         ["return"] = TokenKind.KwReturn,
         ["true"] = TokenKind.KwTrue,
         ["false"] = TokenKind.KwFalse,
+        ["if"] = TokenKind.KwIf,
+        ["else"] = TokenKind.KwElse,
+        ["while"] = TokenKind.KwWhile,
+        ["for"] = TokenKind.KwFor,
+        ["do"] = TokenKind.KwDo,
+        ["break"] = TokenKind.KwBreak,
+        ["continue"] = TokenKind.KwContinue,
     };
 
-    /// <summary>C keywords that are reserved but not supported in version 0.</summary>
+    /// <summary>C keywords that are reserved but not supported yet.</summary>
     public static readonly IReadOnlySet<string> ReservedCWords = new HashSet<string>(StringComparer.Ordinal)
     {
-        "if", "else", "while", "for", "do", "switch", "case", "default", "break", "continue", "goto",
+        "switch", "case", "default", "goto",
         "struct", "union", "enum", "typedef", "void", "char", "short", "long", "float", "double",
         "unsigned", "signed", "_Bool", "const", "static", "extern", "auto", "register", "volatile",
         "inline", "restrict", "sizeof",
@@ -275,7 +297,7 @@ public sealed class Lexer
 
         if (three is "<<=" or ">>=")
         {
-            throw Error(Codes.UnsupportedToken, start, $"compound assignment '{three}' is not supported: bindings are immutable");
+            throw Error(Codes.UnsupportedToken, start, $"compound assignment '{three}' is not supported: there are no shift operators yet");
         }
 
         switch (two)
@@ -289,10 +311,15 @@ public sealed class Lexer
             case "=>": return Take(TokenKind.Arrow, two, start);
             case "->":
                 throw Error(Codes.UnsupportedToken, start, "'->' member access is not supported: version 0 has no pointers or structures");
-            case "++" or "--":
-                throw Error(Codes.UnsupportedToken, start, $"'{two}' is not supported: bindings are immutable (there is no increment or decrement)");
-            case "+=" or "-=" or "*=" or "/=" or "%=" or "&=" or "|=" or "^=":
-                throw Error(Codes.UnsupportedToken, start, $"compound assignment '{two}' is not supported: bindings are immutable");
+            case "++": return Take(TokenKind.PlusPlus, two, start);
+            case "--": return Take(TokenKind.MinusMinus, two, start);
+            case "+=": return Take(TokenKind.PlusAssign, two, start);
+            case "-=": return Take(TokenKind.MinusAssign, two, start);
+            case "*=": return Take(TokenKind.StarAssign, two, start);
+            case "/=": return Take(TokenKind.SlashAssign, two, start);
+            case "%=": return Take(TokenKind.PercentAssign, two, start);
+            case "&=" or "|=" or "^=":
+                throw Error(Codes.UnsupportedToken, start, $"compound assignment '{two}' is not supported: there are no bitwise operators yet");
             case "<<" or ">>":
                 throw Error(Codes.UnsupportedToken, start, $"shift operator '{two}' is not supported in version 0");
         }

@@ -1,0 +1,77 @@
+// if / else if / else statements, braceless bodies, the dangling-else rule, and early returns.
+int classify(int n)
+{
+    if (n < 0) {
+        return -1;
+    } else if (n == 0) {
+        return 0;
+    } else if (n < 10) {
+        return 1;
+    }
+    return 2;
+}
+
+int absolute(int x)
+{
+    if (x < 0) return -x;
+    return x;
+}
+
+bool isLeap(int year)
+{
+    if (year % 400 == 0) return true;
+    if (year % 100 == 0) return false;
+    return year % 4 == 0;
+}
+
+int main()
+{
+    print(classify(-7));
+    print(classify(0));
+    print(classify(5));
+    print(classify(50));
+    print(absolute(-12));
+    print(absolute(3));
+    print(isLeap(2000) ? 1 : 0);
+    print(isLeap(1900) ? 1 : 0);
+    print(isLeap(2024) ? 1 : 0);
+    print(isLeap(2023) ? 1 : 0);
+
+    // Statement-level if without else, and an empty branch.
+    if (true) print(100);
+    if (false) print(999);
+    if (1 > 2) { } else { print(101); }
+
+    // Dangling else: the else belongs to the inner if.
+    if (true)
+        if (false)
+            print(998);
+        else
+            print(102);
+
+    // let bindings inside branches are scoped to their branch.
+    if (absolute(-1) == 1) {
+        let inside = 103;
+        print(inside);
+    } else {
+        let inside = 997;
+        print(inside);
+    }
+    return 0;
+}
+
+//! out: -1
+//! out: 0
+//! out: 1
+//! out: 2
+//! out: 12
+//! out: 3
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 100
+//! out: 101
+//! out: 102
+//! out: 103
+//! fs-contains: elif (n = 0) then

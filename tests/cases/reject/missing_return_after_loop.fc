@@ -1,0 +1,13 @@
+int f(int x)
+{
+    while (x > 0) {
+        return 1;
+    }
+}
+
+int main()
+{
+    return f(1);
+}
+
+//! error: FC3005 6:1 function 'f' can reach its end without returning a value

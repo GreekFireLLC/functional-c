@@ -1,9 +1,0 @@
-int main()
-{
-    if (true) {
-        print(1);
-    }
-    return 0;
-}
-
-//! error: FC2002 3:5 'if' statements are not supported

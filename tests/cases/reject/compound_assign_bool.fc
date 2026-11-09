@@ -1,0 +1,8 @@
+int main()
+{
+    bool done = false;
+    done += 1;
+    return 0;
+}
+
+//! error: FC3007 4:5 '+=' needs an int variable, but 'done' is bool

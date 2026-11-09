@@ -1,0 +1,7 @@
+int main()
+{
+    break;
+    return 0;
+}
+
+//! error: FC3018 3:5 'break' can only be used inside a loop

@@ -1,9 +1,9 @@
 namespace FunctionalC.Compiler;
 
 /// <summary>
-/// Semantic validation for version 0: name resolution, scoping (no shadowing), immutability,
-/// declaration-before-use, the single final return, the entry point, arity, and int/bool types.
-/// Collects every error it finds instead of stopping at the first one.
+/// Semantic validation: name resolution, block scoping (no shadowing), mutability rules, declaration-before-use,
+/// control flow (break/continue placement, unreachable code, every path returns), the entry point, arity,
+/// and int/bool types. Collects every error it finds instead of stopping at the first one.
 /// </summary>
 public sealed class Checker
 {
@@ -15,8 +15,17 @@ public sealed class Checker
     private string _file = "";
     private FunctionSymbol? _current;
 
-    /// <summary>The let binding whose initializer is being checked (it is not yet in scope).</summary>
+    /// <summary>The binding whose initializer is being checked (it is not yet in scope).</summary>
     private string? _pendingName;
+
+    /// <summary>Enclosing loops of the statement being checked, innermost on top.</summary>
+    private readonly Stack<LoopStmt> _loops = new();
+
+    /// <summary>True while checking a lambda body.</summary>
+    private bool _inLambda;
+
+    /// <summary>Variables referenced from lambda bodies in the current function, checked once all assignments are known.</summary>
+    private readonly List<(ValueSymbol Symbol, SourceLocation At)> _captures = [];
 
     public IReadOnlyList<Diagnostic> Check(ProgramNode program)
     {
@@ -51,7 +60,10 @@ public sealed class Checker
         public void Add(Symbol symbol) => _symbols[symbol.Name] = symbol;
     }
 
-    /// <summary>Checks that a new local/parameter name is legal. Shadowing of any visible name is rejected in version 0.</summary>
+    /// <summary>
+    /// Checks that a new name is legal. A name may not shadow anything visible (enclosing blocks, parameters,
+    /// functions, print); sibling blocks may reuse a name.
+    /// </summary>
     private bool CheckNewName(string name, SourceLocation at, Scope scope, string kind)
     {
         if (name == PrintName)
@@ -62,14 +74,14 @@ public sealed class Checker
 
         if (name == _pendingName)
         {
-            Error(Codes.DuplicateName, at, $"{kind} '{name}' has the same name as the binding being defined; shadowing is not allowed in version 0");
+            Error(Codes.DuplicateName, at, $"{kind} '{name}' has the same name as the binding being defined; shadowing is not allowed");
             return false;
         }
 
         if (scope.Lookup(name) is { } existing)
         {
             Error(Codes.DuplicateName, at,
-                $"'{name}' is already defined in this scope (at {existing.DeclaredAt.Short}); names must be unique within a function and shadowing is not allowed in version 0");
+                $"'{name}' is already defined (at {existing.DeclaredAt.Short}) in this block or an enclosing one; redeclaring or shadowing a name is not allowed, so choose another name");
             return false;
         }
 
@@ -77,7 +89,7 @@ public sealed class Checker
         if (function is not null)
         {
             Error(Codes.DuplicateName, at,
-                $"{kind} '{name}' would shadow the function '{name}' defined at {function.DeclaredAt.Short}; shadowing is not allowed in version 0");
+                $"{kind} '{name}' would shadow the function '{name}' defined at {function.DeclaredAt.Short}; shadowing is not allowed");
             return false;
         }
 
@@ -95,7 +107,7 @@ public sealed class Checker
         if (name == _pendingName)
         {
             Error(Codes.SelfReference, at,
-                $"'{name}' cannot be used inside its own initializer; recursive 'let' bindings are not supported in version 0");
+                $"'{name}' cannot be used inside its own initializer; recursive bindings are not supported");
             return null;
         }
 
@@ -112,7 +124,7 @@ public sealed class Checker
         if (_allDeclarations.TryGetValue(name, out var later))
         {
             Error(Codes.ForwardReference, at,
-                $"'{name}' is defined later (at {later.NameLocation.Short}); forward references and mutual recursion are not supported in version 0, so define '{name}' before this use");
+                $"'{name}' is defined later (at {later.NameLocation.Short}); forward references and mutual recursion are not supported yet, so define '{name}' before this use");
             return null;
         }
 
@@ -145,57 +157,36 @@ public sealed class Checker
         }
 
         _current = symbol;
+        _captures.Clear();
         var scope = new Scope(null);
         foreach (var parameter in function.Parameters)
         {
             if (CheckNewName(parameter.Name, parameter.Location, scope, "parameter"))
             {
-                parameter.Symbol = new ValueSymbol(parameter.Name, parameter.Location, parameter.Type, "parameter");
+                // Parameters are C-style typed declarations, so (as in C) they are mutable local copies.
+                parameter.Symbol = new ValueSymbol(parameter.Name, parameter.Location, parameter.Type, "parameter", isMutable: true);
                 scope.Add(parameter.Symbol);
             }
         }
 
-        for (int i = 0; i < function.Body.Count; i++)
+        // The body shares the parameters' scope, as in C: a local cannot redeclare a parameter.
+        bool fallsOffEnd = CheckStatements(function.Body, scope);
+        if (fallsOffEnd)
         {
-            bool isLast = i == function.Body.Count - 1;
-            switch (function.Body[i])
+            Error(Codes.ReturnPlacement, function.CloseBraceLocation,
+                $"function '{function.Name}' can reach its end without returning a value; every path must end with 'return <expression>;'");
+        }
+
+        foreach (var (captured, at) in _captures)
+        {
+            if (captured.IsAssigned)
             {
-                case ReturnStmt ret:
-                    if (!isLast)
-                    {
-                        Error(Codes.ReturnPlacement, ret.Location,
-                            "'return' must be the last statement of a function body; early returns are not supported in version 0");
-                    }
-
-                    var type = CheckExpression(ret.Value, scope);
-                    if (type is not null && type != function.ReturnType)
-                    {
-                        Error(Codes.TypeMismatch, ret.Value.Location,
-                            $"function '{function.Name}' returns {function.ReturnType.Name()} but this expression has type {type.Name()}");
-                    }
-
-                    break;
-
-                case LetStmt let:
-                    CheckLet(let, scope);
-                    break;
-
-                case AssignStmt assign:
-                    CheckAssignment(assign, scope);
-                    break;
-
-                case ExprStmt statement:
-                    CheckExpressionStatement(statement, scope);
-                    break;
+                Error(Codes.MutableCapture, at,
+                    $"a lambda cannot capture '{captured.Name}' (declared at {captured.DeclaredAt.Short}) because it is a mutable variable that is assigned; copy its current value into an immutable binding first, e.g. 'let {captured.Name}Value = {captured.Name};'");
             }
         }
 
-        if (function.Body.Count == 0 || function.Body[^1] is not ReturnStmt)
-        {
-            Error(Codes.ReturnPlacement, function.CloseBraceLocation,
-                $"function '{function.Name}' must end with 'return <expression>;'");
-        }
-
+        _captures.Clear();
         _current = null;
     }
 
@@ -222,15 +213,158 @@ public sealed class Checker
 
         if (main.Parameters.Count > 0)
         {
-            Error(Codes.EntryPoint, main.Parameters[0].Location, "'main' must not take parameters in version 0");
+            Error(Codes.EntryPoint, main.Parameters[0].Location, "'main' must not take parameters");
         }
     }
 
     // ------------------------------------------------------------ statements
 
-    private void CheckLet(LetStmt let, Scope scope)
+    /// <summary>Checks a statement sequence in the given scope. Returns true if control can flow past its end.</summary>
+    private bool CheckStatements(IReadOnlyList<Stmt> statements, Scope scope)
     {
-        bool nameOk = CheckNewName(let.Name, let.NameLocation, scope, "local binding");
+        bool reachable = true;
+        bool reported = false;
+        foreach (var statement in statements)
+        {
+            if (!reachable && !reported && statement is not EmptyStmt)
+            {
+                Error(Codes.Unreachable, statement.Location,
+                    "unreachable statement: the statement before it never finishes normally (it returns, breaks, continues, or loops forever)");
+                reported = true;
+            }
+
+            if (!CheckStatement(statement, scope))
+            {
+                reachable = false;
+            }
+        }
+
+        return reachable;
+    }
+
+    /// <summary>Checks one statement. Returns (and records) whether control can flow past it.</summary>
+    private bool CheckStatement(Stmt statement, Scope scope)
+    {
+        bool completes = statement switch
+        {
+            EmptyStmt => true,
+            BlockStmt block => CheckStatements(block.Statements, new Scope(scope)),
+            LetStmt let => CheckLet(let, scope),
+            DeclarationStmt declaration => CheckDeclaration(declaration, scope),
+            AssignStmt assign => CheckAssignment(assign, scope),
+            ExprStmt expression => CheckExpressionStatement(expression, scope),
+            ReturnStmt ret => CheckReturn(ret, scope),
+            IfStmt branch => CheckIf(branch, scope),
+            WhileStmt loop => CheckWhile(loop, scope),
+            DoWhileStmt loop => CheckDoWhile(loop, scope),
+            ForStmt loop => CheckFor(loop, scope),
+            BreakStmt jump => CheckJump(jump, "break"),
+            ContinueStmt jump => CheckJump(jump, "continue"),
+            _ => throw new InvalidOperationException($"unexpected statement node {statement.GetType().Name}"),
+        };
+        statement.CanCompleteNormally = completes;
+        return completes;
+    }
+
+    private bool CheckReturn(ReturnStmt ret, Scope scope)
+    {
+        var type = CheckExpression(ret.Value, scope);
+        var function = _current!.Declaration;
+        if (type is not null && type != function.ReturnType)
+        {
+            Error(Codes.TypeMismatch, ret.Value.Location,
+                $"function '{function.Name}' returns {function.ReturnType.Name()} but this expression has type {type.Name()}");
+        }
+
+        return false;
+    }
+
+    private void CheckCondition(Expr condition, Scope scope, string construct)
+    {
+        var type = CheckExpression(condition, scope);
+        if (type is FcType.Int)
+        {
+            Error(Codes.TypeMismatch, condition.Location,
+                $"the condition of '{construct}' must be bool but has type int; there is no implicit int-to-bool conversion (compare explicitly, e.g. 'x != 0')");
+        }
+    }
+
+    private bool CheckIf(IfStmt branch, Scope scope)
+    {
+        CheckCondition(branch.Condition, scope, "if");
+        bool thenCompletes = CheckStatement(branch.Then, new Scope(scope));
+        bool elseCompletes = branch.Else is null || CheckStatement(branch.Else, new Scope(scope));
+        return thenCompletes || elseCompletes;
+    }
+
+    private bool CheckLoopBody(LoopStmt loop, Scope scope)
+    {
+        _loops.Push(loop);
+        bool completes = CheckStatement(loop.Body, new Scope(scope));
+        _loops.Pop();
+        return completes;
+    }
+
+    private bool CheckWhile(WhileStmt loop, Scope scope)
+    {
+        CheckCondition(loop.Condition, scope, "while");
+        CheckLoopBody(loop, scope);
+        return !Flow.IsAlwaysTrue(loop.Condition) || loop.UsesBreak;
+    }
+
+    private bool CheckDoWhile(DoWhileStmt loop, Scope scope)
+    {
+        bool bodyCompletes = CheckLoopBody(loop, scope);
+        CheckCondition(loop.Condition, scope, "do ... while"); // body declarations are not visible here, as in C
+        bool conditionReachable = bodyCompletes || loop.UsesContinue;
+        return loop.UsesBreak || (conditionReachable && !Flow.IsAlwaysTrue(loop.Condition));
+    }
+
+    private bool CheckFor(ForStmt loop, Scope scope)
+    {
+        var loopScope = new Scope(scope); // variables declared in the initializer belong to the loop
+        foreach (var init in loop.Init)
+        {
+            CheckStatement(init, loopScope);
+        }
+
+        if (loop.Condition is not null)
+        {
+            CheckCondition(loop.Condition, loopScope, "for");
+        }
+
+        CheckLoopBody(loop, loopScope);
+        foreach (var update in loop.Update)
+        {
+            CheckStatement(update, loopScope);
+        }
+
+        return !Flow.IsAlwaysTrue(loop.Condition) || loop.UsesBreak;
+    }
+
+    private bool CheckJump(Stmt jump, string keyword)
+    {
+        if (_loops.Count == 0)
+        {
+            Error(Codes.JumpOutsideLoop, jump.Location, $"'{keyword}' can only be used inside a loop (while, do ... while, or for)");
+            return true; // already an error; do not also report the following statements as unreachable
+        }
+
+        if (jump is BreakStmt)
+        {
+            _loops.Peek().UsesBreak = true;
+        }
+        else
+        {
+            _loops.Peek().UsesContinue = true;
+        }
+
+        return false;
+    }
+
+    private bool CheckLet(LetStmt let, Scope scope)
+    {
+        bool nameOk = CheckNewName(let.Name, let.NameLocation, scope, "let binding");
         _pendingName = let.Name;
         Symbol symbol;
         if (let.Initializer is LambdaExpr lambda)
@@ -241,7 +375,7 @@ public sealed class Checker
         else
         {
             var type = CheckExpression(let.Initializer, scope);
-            symbol = new ValueSymbol(let.Name, let.NameLocation, type, "local binding");
+            symbol = new ValueSymbol(let.Name, let.NameLocation, type, "let binding", isMutable: false);
         }
 
         _pendingName = null;
@@ -250,51 +384,112 @@ public sealed class Checker
         {
             scope.Add(symbol);
         }
+
+        return true;
     }
 
-    private void CheckAssignment(AssignStmt assign, Scope scope)
+    private bool CheckDeclaration(DeclarationStmt declaration, Scope scope)
     {
-        CheckExpression(assign.Value, scope);
+        foreach (var declarator in declaration.Declarators)
+        {
+            bool nameOk = CheckNewName(declarator.Name, declarator.NameLocation, scope, "variable");
+            _pendingName = declarator.Name;
+            var type = CheckExpression(declarator.Initializer, scope);
+            _pendingName = null;
+            if (type is not null && type != declaration.Type)
+            {
+                Error(Codes.TypeMismatch, declarator.Initializer.Location,
+                    $"cannot initialize the {declaration.Type.Name()} variable '{declarator.Name}' with a value of type {type.Name()}");
+            }
+
+            declarator.Symbol = new ValueSymbol(declarator.Name, declarator.NameLocation, declaration.Type, "variable", isMutable: true);
+            if (nameOk)
+            {
+                scope.Add(declarator.Symbol);
+            }
+        }
+
+        return true;
+    }
+
+    private bool CheckAssignment(AssignStmt assign, Scope scope)
+    {
+        var valueType = assign.Value is null ? null : CheckExpression(assign.Value, scope);
         var symbol = scope.Lookup(assign.Name) ?? _functions.GetValueOrDefault(assign.Name);
+        string op = assign.Op.Source();
         switch (symbol)
         {
+            case ValueSymbol { IsMutable: true } variable:
+                variable.IsAssigned = true;
+                assign.Symbol = variable;
+                if (assign.Op == AssignOp.Set)
+                {
+                    if (valueType is not null && variable.Type is not null && valueType != variable.Type)
+                    {
+                        Error(Codes.TypeMismatch, assign.Value!.Location,
+                            $"cannot assign a value of type {valueType.Name()} to the {variable.Type.Name()} {variable.Kind} '{assign.Name}'");
+                    }
+                }
+                else
+                {
+                    if (variable.Type is FcType.Bool)
+                    {
+                        Error(Codes.TypeMismatch, assign.Location, $"'{op}' needs an int variable, but '{assign.Name}' is bool");
+                    }
+
+                    if (valueType is FcType.Bool)
+                    {
+                        Error(Codes.TypeMismatch, assign.Value!.Location, $"'{op}' needs an int value but this expression has type bool");
+                    }
+                }
+
+                break;
+
             case ValueSymbol value:
                 Error(Codes.ImmutableBinding, assign.Location,
-                    $"cannot assign to '{assign.Name}': {value.Kind}s are immutable ('{assign.Name}' was bound at {value.DeclaredAt.Short})");
+                    value.Kind == "lambda parameter"
+                        ? $"cannot assign to '{assign.Name}': lambda parameters are immutable"
+                        : $"cannot assign to '{assign.Name}': 'let' bindings are immutable ('{assign.Name}' was bound at {value.DeclaredAt.Short}); declare it as '{value.Type.Name()} {assign.Name} = ...;' if it needs to change");
                 break;
+
             case LambdaSymbol lambda:
                 Error(Codes.ImmutableBinding, assign.Location,
-                    $"cannot assign to '{assign.Name}': bindings are immutable ('{assign.Name}' was bound at {lambda.DeclaredAt.Short})");
+                    $"cannot assign to '{assign.Name}': it is a 'let'-bound lambda (bound at {lambda.DeclaredAt.Short}) and bindings are immutable");
                 break;
+
             case FunctionSymbol function:
                 Error(Codes.ImmutableBinding, assign.Location,
                     $"cannot assign to the function '{assign.Name}' (defined at {function.DeclaredAt.Short})");
                 break;
+
             default:
                 Error(Codes.UnknownName, assign.Location,
-                    $"cannot assign to unknown name '{assign.Name}'; assignment is not supported (use 'let' to bind a new immutable name)");
+                    $"cannot assign to unknown name '{assign.Name}'; declare it first, e.g. 'int {assign.Name} = 0;'");
                 break;
         }
+
+        return true;
     }
 
-    private void CheckExpressionStatement(ExprStmt statement, Scope scope)
+    private bool CheckExpressionStatement(ExprStmt statement, Scope scope)
     {
         if (statement.Expression is CallExpr { Callee: PrintName } print)
         {
             print.IsPrint = true;
             CheckPrintArguments(print, scope);
-            return;
+            return true;
         }
 
         if (statement.Expression is CallExpr call)
         {
             CheckCall(call, scope);
-            return;
+            return true;
         }
 
         CheckExpression(statement.Expression, scope);
         Error(Codes.DiscardedExpression, statement.Location,
-            "only calls can be used as statements; this expression's value would be discarded");
+            "only calls, assignments and increments can be used as statements; this expression's value would be discarded");
+        return true;
     }
 
     private void CheckPrintArguments(CallExpr print, Scope scope)
@@ -321,12 +516,15 @@ public sealed class Checker
         {
             if (CheckNewName(parameter.Name, parameter.Location, lambdaScope, "lambda parameter"))
             {
-                parameter.Symbol = new ValueSymbol(parameter.Name, parameter.Location, parameter.Type, "lambda parameter");
+                parameter.Symbol = new ValueSymbol(parameter.Name, parameter.Location, parameter.Type, "lambda parameter", isMutable: false);
                 lambdaScope.Add(parameter.Symbol);
             }
         }
 
-        return CheckExpression(lambda.Body, lambdaScope);
+        _inLambda = true;
+        var type = CheckExpression(lambda.Body, lambdaScope);
+        _inLambda = false;
+        return type;
     }
 
     /// <summary>Returns the expression's type, or null if an error was reported (to avoid cascading errors).</summary>
@@ -353,12 +551,17 @@ public sealed class Checker
                 switch (symbol)
                 {
                     case ValueSymbol value:
+                        if (_inLambda && value.Kind != "lambda parameter")
+                        {
+                            _captures.Add((value, name.Location));
+                        }
+
                         return value.Type;
                     case null:
                         return null;
                     default:
                         Error(Codes.NotAValue, name.Location,
-                            $"'{name.Name}' is a function; it can only be called, as in '{name.Name}(...)' (functions are not values in version 0)");
+                            $"'{name.Name}' is a function; it can only be called, as in '{name.Name}(...)' (functions are not values yet)");
                         return null;
                 }
             }
@@ -415,7 +618,7 @@ public sealed class Checker
 
             case LambdaExpr lambda:
                 Error(Codes.LambdaPosition, lambda.Location,
-                    "a lambda can only be the entire initializer of a 'let' binding in version 0, as in 'let f = (int x) => x + 1;'");
+                    "a lambda can only be the entire initializer of a 'let' binding, as in 'let f = (int x) => x + 1;'");
                 return null;
 
             default:

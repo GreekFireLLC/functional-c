@@ -31,6 +31,14 @@ int main()
     print(5 - -1);
     print(-System(3));
     print(!(1 > 2) && !!true ? 7 : 8);
+
+    // Loop flags must use the prelude's negation, not the user's 'not' above.
+    int spins = 0;
+    while (true) {
+        spins++;
+        if (spins == 3) break;
+    }
+    print(spins);
     return 0;
 }
 
@@ -41,4 +49,5 @@ int main()
 //! out: 6
 //! out: -2
 //! out: 7
+//! out: 3
 //! fs-contains: fc'ignore (ignore 1)

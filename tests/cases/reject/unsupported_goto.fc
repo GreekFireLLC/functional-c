@@ -1,0 +1,7 @@
+int main()
+{
+    goto done;
+    return 0;
+}
+
+//! error: FC2002 3:5 'goto' is not supported

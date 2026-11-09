@@ -1,0 +1,9 @@
+int main()
+{
+    if (true) {
+        continue;
+    }
+    return 0;
+}
+
+//! error: FC3018 4:9 'continue' can only be used inside a loop

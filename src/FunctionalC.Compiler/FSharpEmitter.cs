@@ -129,9 +129,32 @@ public sealed class FSharpEmitter
         header.Append($" : {TypeName(function.ReturnType)} =");
         Line(header.ToString());
 
-        foreach (var statement in function.Body)
+        _loopCounter = 0;
+        var body = new List<string>();
+        foreach (var parameter in function.Parameters)
         {
-            Line(Indent + EmitStatement(statement));
+            if (parameter.Symbol is ValueSymbol { IsAssigned: true } assigned)
+            {
+                // C parameters are mutable local copies; F# parameters are not, so shadow with a mutable copy.
+                body.Add($"let mutable {assigned.FSharpName} = {assigned.FSharpName}");
+            }
+        }
+
+        if (CanEmitAsExpression(function.Body))
+        {
+            body.AddRange(TailBlock(function.Body));
+        }
+        else
+        {
+            body.Add($"let mutable {Result} = {DefaultValue(function.ReturnType)}");
+            body.Add($"let mutable {Returned} = false");
+            body.AddRange(UnitBlock(function.Body, new Context(FlagMode: true, Loop: null)));
+            body.Add(Result);
+        }
+
+        foreach (var line in body)
+        {
+            Line(Indent + line);
         }
 
         Line();
@@ -142,14 +165,378 @@ public sealed class FSharpEmitter
             ? " ()"
             : string.Concat(parameters.Select(p => $" ({p.Symbol!.FSharpName}: {TypeName(p.Type)})"));
 
-    private string EmitStatement(Stmt statement) => statement switch
+    private static string DefaultValue(FcType type) => type == FcType.Int ? "0" : "false";
+
+    // ------------------------------------------------------------ statements
+    //
+    // F# has no 'return', 'break' or 'continue', so a function body is emitted in one of two modes:
+    //
+    // * Expression mode, when every 'return' sits where F# can express it directly: straight-line code ending in
+    //   a return, or an 'if' where one branch always returns (the statements after the 'if' move into the other
+    //   branch, so nothing is duplicated). Loops in such functions contain no 'return'.
+    //
+    // * Flag mode otherwise (a 'return' inside a loop, or inside an 'if' that only sometimes returns): the result
+    //   goes into 'fc'result', 'fc'returned' records that a return happened, statements that may follow a return,
+    //   break or continue are guarded by those flags, and loop conditions check them first.
+    //
+    // 'break' and 'continue' use per-loop flags (fc'brkN, fc'contN) in both modes.
+
+    private const string Result = "fc'result";
+    private const string Returned = "fc'returned";
+
+    private int _loopCounter;
+
+    private sealed class LoopFlags(int id)
     {
-        LetStmt let => $"let {let.Symbol!.FSharpName} = {EmitExpression(let.Initializer)}",
-        ExprStmt { Expression: CallExpr { IsPrint: true } print } => $"{FSharpNames.Print} {EmitExpression(print.Arguments[0])}",
-        ExprStmt { Expression: CallExpr call } => $"{FSharpNames.Ignore} {EmitCall(call)}",
-        ReturnStmt ret => EmitExpression(ret.Value),
-        _ => throw new InvalidOperationException($"statement {statement.GetType().Name} cannot be emitted (the checker should have rejected it)"),
-    };
+        public string Break { get; } = $"fc'brk{id}";
+        public string Continue { get; } = $"fc'cont{id}";
+        public string Again { get; } = $"fc'again{id}";
+    }
+
+    private sealed record Context(bool FlagMode, LoopFlags? Loop);
+
+    private static IEnumerable<string> Indented(IEnumerable<string> lines) => lines.Select(l => Indent + l);
+
+    /// <summary>A unit-typed F# block cannot be empty or end with a 'let'.</summary>
+    private static List<string> EnsureUnit(List<string> lines)
+    {
+        if (lines.Count == 0 || lines[^1].StartsWith("let ", StringComparison.Ordinal))
+        {
+            lines.Add("()");
+        }
+
+        return lines;
+    }
+
+    private static string NotAny(IReadOnlyList<string> flags) =>
+        flags.Count == 1 ? $"({FSharpNames.Not} {flags[0]})" : $"({FSharpNames.Not} ({string.Join(" || ", flags)}))";
+
+    /// <summary>Splits an 'if' with returns for expression mode. False if neither branch always returns.</summary>
+    private static bool TailBranches(IfStmt branch, IReadOnlyList<Stmt> rest, out List<Stmt> thenList, out List<Stmt> elseList)
+    {
+        bool thenExits = !branch.Then.CanCompleteNormally;
+        bool elseExits = branch.Else is { CanCompleteNormally: false };
+        thenList = [.. Flow.Flatten(branch.Then)];
+        elseList = branch.Else is null ? [] : [.. Flow.Flatten(branch.Else)];
+        if (!thenExits && !elseExits)
+        {
+            return false;
+        }
+
+        // The statements after the 'if' only run when the branch that does not always return was taken.
+        (thenExits ? elseList : thenList).AddRange(rest);
+        return true;
+    }
+
+    private static bool CanEmitAsExpression(IReadOnlyList<Stmt> statements)
+    {
+        for (int i = 0; i < statements.Count; i++)
+        {
+            var rest = statements.Skip(i + 1).ToList();
+            switch (statements[i])
+            {
+                case ReturnStmt:
+                    return true;
+                case BlockStmt block:
+                    return CanEmitAsExpression([.. block.Statements, .. rest]);
+                case IfStmt branch when Flow.ContainsReturn(branch):
+                    return TailBranches(branch, rest, out var thenList, out var elseList)
+                           && CanEmitAsExpression(thenList)
+                           && CanEmitAsExpression(elseList);
+                case var other when Flow.ContainsReturn(other):
+                    return false; // a return inside a loop
+            }
+        }
+
+        return false; // control never reaches a return (e.g. an infinite loop): use flag mode
+    }
+
+    /// <summary>Expression mode: unit statements followed by the value of the final return (or an if/elif/else of them).</summary>
+    private List<string> TailBlock(IReadOnlyList<Stmt> statements)
+    {
+        var lines = new List<string>();
+        var context = new Context(FlagMode: false, Loop: null);
+        for (int i = 0; i < statements.Count; i++)
+        {
+            var rest = statements.Skip(i + 1).ToList();
+            switch (statements[i])
+            {
+                case ReturnStmt ret:
+                    lines.Add(EmitExpression(ret.Value));
+                    return lines;
+
+                case BlockStmt block:
+                    lines.AddRange(TailBlock([.. block.Statements, .. rest]));
+                    return lines;
+
+                case IfStmt branch when Flow.ContainsReturn(branch):
+                {
+                    TailBranches(branch, rest, out var thenList, out var elseList);
+                    lines.Add($"if {EmitExpression(branch.Condition)} then");
+                    lines.AddRange(Indented(TailBlock(thenList)));
+                    var elseLines = TailBlock(elseList);
+                    if (elseList[0] is IfStmt nested && Flow.ContainsReturn(nested))
+                    {
+                        elseLines[0] = "el" + elseLines[0]; // the else part is exactly one if-expression
+                        lines.AddRange(elseLines);
+                    }
+                    else
+                    {
+                        lines.Add("else");
+                        lines.AddRange(Indented(elseLines));
+                    }
+
+                    return lines;
+                }
+
+                default:
+                    lines.AddRange(UnitStatement(statements[i], context));
+                    break;
+            }
+        }
+
+        throw new InvalidOperationException("statement list does not end in a return (CanEmitAsExpression should have been false)");
+    }
+
+    /// <summary>A unit-typed statement sequence; statements after one that may exit are guarded by the exit flags.</summary>
+    private List<string> UnitBlock(IReadOnlyList<Stmt> statements, Context context)
+    {
+        var lines = new List<string>();
+        for (int i = 0; i < statements.Count; i++)
+        {
+            lines.AddRange(UnitStatement(statements[i], context));
+            if (i == statements.Count - 1)
+            {
+                break;
+            }
+
+            var exits = ExitFlags(statements[i], context);
+            if (exits.Count > 0)
+            {
+                lines.Add($"if {NotAny(exits)} then");
+                lines.AddRange(Indented(UnitBlock(statements.Skip(i + 1).ToList(), context)));
+                break;
+            }
+        }
+
+        return EnsureUnit(lines);
+    }
+
+    /// <summary>The flags a statement may set that must stop the rest of the current sequence.</summary>
+    private static List<string> ExitFlags(Stmt statement, Context context)
+    {
+        var flags = new List<string>();
+        if (context.FlagMode && Flow.ContainsReturn(statement))
+        {
+            flags.Add(Returned);
+        }
+
+        if (context.Loop is { } loop)
+        {
+            if (Flow.ContainsBreak(statement))
+            {
+                flags.Add(loop.Break);
+            }
+
+            if (Flow.ContainsContinue(statement))
+            {
+                flags.Add(loop.Continue);
+            }
+        }
+
+        return flags;
+    }
+
+    private List<string> UnitStatement(Stmt statement, Context context)
+    {
+        switch (statement)
+        {
+            case EmptyStmt:
+                return [];
+            case BlockStmt block:
+                return UnitBlock(block.Statements, context);
+            case LetStmt let:
+                return [$"let {let.Symbol!.FSharpName} = {EmitExpression(let.Initializer)}"];
+            case DeclarationStmt declaration:
+                return declaration.Declarators
+                    .Select(d => $"let {(d.Symbol!.IsAssigned ? "mutable " : "")}{d.Symbol.FSharpName} = {EmitExpression(d.Initializer)}")
+                    .ToList();
+            case AssignStmt assign:
+                return [EmitAssignment(assign)];
+            case ExprStmt { Expression: CallExpr { IsPrint: true } print }:
+                return [$"{FSharpNames.Print} {EmitExpression(print.Arguments[0])}"];
+            case ExprStmt { Expression: CallExpr call }:
+                return [$"{FSharpNames.Ignore} {EmitCall(call)}"];
+            case ReturnStmt ret when context.FlagMode:
+                return [$"{Result} <- {EmitExpression(ret.Value)}", $"{Returned} <- true"];
+            case BreakStmt when context.Loop is { } loop:
+                return [$"{loop.Break} <- true"];
+            case ContinueStmt when context.Loop is { } loop:
+                return [$"{loop.Continue} <- true"];
+            case IfStmt branch:
+                return EmitIf(branch, context);
+            case WhileStmt loop:
+                return EmitWhile(loop, context);
+            case DoWhileStmt loop:
+                return EmitDoWhile(loop, context);
+            case ForStmt loop:
+                return EmitFor(loop, context);
+            default:
+                throw new InvalidOperationException($"statement {statement.GetType().Name} cannot be emitted here (the checker should have rejected it)");
+        }
+    }
+
+    private string EmitAssignment(AssignStmt assign)
+    {
+        string name = assign.Symbol!.FSharpName;
+        string value = assign.Op switch
+        {
+            AssignOp.Set => EmitExpression(assign.Value!),
+            AssignOp.Increment => $"({name} + 1)",
+            AssignOp.Decrement => $"({name} - 1)",
+            AssignOp.Add => $"({name} + {EmitExpression(assign.Value!)})",
+            AssignOp.Subtract => $"({name} - {EmitExpression(assign.Value!)})",
+            AssignOp.Multiply => $"({name} * {EmitExpression(assign.Value!)})",
+            AssignOp.Divide => $"({name} / {EmitExpression(assign.Value!)})",
+            AssignOp.Remainder => $"({name} % {EmitExpression(assign.Value!)})",
+            _ => throw new InvalidOperationException($"unexpected assignment operator {assign.Op}"),
+        };
+        return $"{name} <- {value}";
+    }
+
+    private List<string> EmitIf(IfStmt branch, Context context)
+    {
+        var lines = new List<string> { $"if {EmitExpression(branch.Condition)} then" };
+        lines.AddRange(Indented(UnitBlock(Flow.Flatten(branch.Then), context)));
+        if (branch.Else is IfStmt elseIf)
+        {
+            var nested = EmitIf(elseIf, context);
+            nested[0] = "el" + nested[0];
+            lines.AddRange(nested);
+        }
+        else if (branch.Else is { } other)
+        {
+            lines.Add("else");
+            lines.AddRange(Indented(UnitBlock(Flow.Flatten(other), context)));
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// The loop test: exit flags first (so the source condition is not evaluated after a break or return),
+    /// then the source condition. A literal 'true' (or a missing 'for' condition) is dropped when flags exist.
+    /// </summary>
+    private string LoopCondition(LoopFlags flags, LoopStmt loop, Context context, Expr? condition)
+    {
+        var parts = new List<string>();
+        if (loop.UsesBreak)
+        {
+            parts.Add($"({FSharpNames.Not} {flags.Break})");
+        }
+
+        if (context.FlagMode && Flow.ContainsReturn(loop.Body))
+        {
+            parts.Add($"({FSharpNames.Not} {Returned})");
+        }
+
+        if (!Flow.IsAlwaysTrue(condition) || parts.Count == 0)
+        {
+            parts.Add(condition is null ? "true" : EmitExpression(condition));
+        }
+
+        return string.Join(" && ", parts);
+    }
+
+    private List<string> LoopBody(LoopFlags flags, LoopStmt loop, Context context)
+    {
+        var lines = new List<string>();
+        if (loop.UsesContinue)
+        {
+            lines.Add($"let mutable {flags.Continue} = false");
+        }
+
+        lines.AddRange(UnitBlock(Flow.Flatten(loop.Body), context with { Loop = flags }));
+        return lines;
+    }
+
+    private List<string> EmitWhile(WhileStmt loop, Context context)
+    {
+        var flags = new LoopFlags(++_loopCounter);
+        var lines = new List<string>();
+        if (loop.UsesBreak)
+        {
+            lines.Add($"let mutable {flags.Break} = false");
+        }
+
+        lines.Add($"while {LoopCondition(flags, loop, context, loop.Condition)} do");
+        lines.AddRange(Indented(LoopBody(flags, loop, context)));
+        return lines;
+    }
+
+    /// <summary>do-while runs the body first; 'continue' jumps to the condition, as in C.</summary>
+    private List<string> EmitDoWhile(DoWhileStmt loop, Context context)
+    {
+        var flags = new LoopFlags(++_loopCounter);
+        var lines = new List<string>();
+        if (loop.UsesBreak)
+        {
+            lines.Add($"let mutable {flags.Break} = false");
+        }
+
+        lines.Add($"let mutable {flags.Again} = true");
+        lines.Add($"while {flags.Again} do");
+        var body = LoopBody(flags, loop, context);
+        body.Add($"{flags.Again} <- {LoopCondition(flags, loop, context, loop.Condition)}");
+        lines.AddRange(Indented(body));
+        return lines;
+    }
+
+    /// <summary>for = initializer, then a while loop whose body ends with the update ('continue' still runs the update).</summary>
+    private List<string> EmitFor(ForStmt loop, Context context)
+    {
+        var lines = new List<string>();
+        foreach (var init in loop.Init)
+        {
+            lines.AddRange(UnitStatement(init, context));
+        }
+
+        var flags = new LoopFlags(++_loopCounter);
+        if (loop.UsesBreak)
+        {
+            lines.Add($"let mutable {flags.Break} = false");
+        }
+
+        lines.Add($"while {LoopCondition(flags, loop, context, loop.Condition)} do");
+        var body = LoopBody(flags, loop, context);
+        if (loop.Update.Count > 0)
+        {
+            var update = loop.Update.SelectMany(u => UnitStatement(u, context)).ToList();
+            var skipOn = new List<string>();
+            if (loop.UsesBreak)
+            {
+                skipOn.Add(flags.Break);
+            }
+
+            if (context.FlagMode && Flow.ContainsReturn(loop.Body))
+            {
+                skipOn.Add(Returned);
+            }
+
+            if (skipOn.Count > 0)
+            {
+                body.Add($"if {NotAny(skipOn)} then");
+                body.AddRange(Indented(update));
+            }
+            else
+            {
+                body.AddRange(update);
+            }
+        }
+
+        lines.AddRange(Indented(body));
+        return lines;
+    }
 
     /// <summary>Returns either an atom (name, non-negative literal, true/false) or a fully parenthesized expression.</summary>
     private string EmitExpression(Expr expression) => expression switch

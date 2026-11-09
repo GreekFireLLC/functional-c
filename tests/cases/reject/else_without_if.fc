@@ -1,0 +1,10 @@
+int main()
+{
+    print(1);
+    else {
+        print(2);
+    }
+    return 0;
+}
+
+//! error: FC2001 4:5 'else' without a matching 'if'

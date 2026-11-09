@@ -1,0 +1,54 @@
+int mark(int x)
+{
+    print(x);
+    return x;
+}
+
+int main()
+{
+    // break exits only the innermost loop.
+    for (int i = 1; i <= 3; i++) {
+        for (int j = 1; j <= 3; j++) {
+            if (j == 2) break;
+            print(i * 10 + j);
+        }
+    }
+
+    // continue in a for loop still runs the update.
+    int odd = 0;
+    for (int i = 0; i < 6; i++) {
+        if (i % 2 == 0) continue;
+        odd += i;
+    }
+    print(odd);
+
+    // After break, neither the update nor the condition runs again.
+    int u = 0;
+    for (int i = 0; mark(i) < 100; i = mark(i + 50)) {
+        u++;
+        if (u == 2) break;
+    }
+    print(u);
+
+    // continue and break in a while loop.
+    int n = 0;
+    int seen = 0;
+    while (true) {
+        n++;
+        if (n > 6) break;
+        if (n == 3) continue;
+        seen += n;
+    }
+    print(seen);
+    return 0;
+}
+
+//! out: 11
+//! out: 21
+//! out: 31
+//! out: 9
+//! out: 0
+//! out: 50
+//! out: 50
+//! out: 2
+//! out: 18

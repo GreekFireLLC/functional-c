@@ -1,0 +1,9 @@
+int main()
+{
+    while (true) {
+        print(1);
+    }
+    return 0;
+}
+
+//! error: FC3016 6:5 unreachable statement

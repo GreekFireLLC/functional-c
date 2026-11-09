@@ -1,0 +1,10 @@
+int main()
+{
+    int x = 1;
+    do {
+        x--;
+    } while (x > 0)
+    return 0;
+}
+
+//! error: FC2001 6:20 expected ';' at the end of the statement but found 'return'

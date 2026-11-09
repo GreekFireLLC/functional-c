@@ -48,4 +48,7 @@ public static class Codes
     public const string PrintMisuse = "FC3013";
     public const string LambdaPosition = "FC3014";
     public const string SelfReference = "FC3015";
+    public const string Unreachable = "FC3016";
+    public const string MutableCapture = "FC3017";
+    public const string JumpOutsideLoop = "FC3018";
 }

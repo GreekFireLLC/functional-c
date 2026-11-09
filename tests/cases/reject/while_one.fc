@@ -1,0 +1,10 @@
+// The C idiom while (1) is rejected: there is no implicit int-to-bool conversion.
+int main()
+{
+    while (1) {
+        break;
+    }
+    return 0;
+}
+
+//! error: FC3007 4:12 the condition of 'while' must be bool

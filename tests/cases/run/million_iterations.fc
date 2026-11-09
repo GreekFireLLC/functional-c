@@ -1,0 +1,16 @@
+// A million iterations: loops become .NET while loops, not recursion, so the stack does not grow.
+int main()
+{
+    int count = 0;
+    int sum = 0;
+    for (int i = 0; i < 1000000; i++) {
+        count++;
+        sum = (sum + i) % 997;
+    }
+    print(count);
+    print(sum);
+    return 0;
+}
+
+//! out: 1000000
+//! out: 36

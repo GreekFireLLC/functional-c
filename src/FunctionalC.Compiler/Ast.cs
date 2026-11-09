@@ -144,7 +144,111 @@ public sealed class Parameter(FcType type, string name, SourceLocation location)
 public abstract class Stmt(SourceLocation location)
 {
     public SourceLocation Location { get; } = location;
+
+    /// <summary>
+    /// Set by the checker: false when control can never flow past this statement
+    /// (it returns, breaks, continues, or loops forever on every path).
+    /// </summary>
+    public bool CanCompleteNormally { get; set; } = true;
 }
+
+/// <summary>"{ ... }": a nested block with its own scope.</summary>
+public sealed class BlockStmt(IReadOnlyList<Stmt> statements, SourceLocation location) : Stmt(location)
+{
+    public IReadOnlyList<Stmt> Statements { get; } = statements;
+}
+
+/// <summary>A lone ";".</summary>
+public sealed class EmptyStmt(SourceLocation location) : Stmt(location);
+
+/// <summary>One "name = initializer" part of a typed declaration.</summary>
+public sealed class VarDeclarator(string name, SourceLocation nameLocation, Expr initializer)
+{
+    public string Name { get; } = name;
+    public SourceLocation NameLocation { get; } = nameLocation;
+    public Expr Initializer { get; } = initializer;
+
+    /// <summary>Set by the checker.</summary>
+    public ValueSymbol? Symbol { get; set; }
+}
+
+/// <summary>"int a = 1, b = 2;": C-style typed declarations, which are mutable variables. No new scope.</summary>
+public sealed class DeclarationStmt(FcType type, IReadOnlyList<VarDeclarator> declarators, SourceLocation location)
+    : Stmt(location)
+{
+    public FcType Type { get; } = type;
+    public IReadOnlyList<VarDeclarator> Declarators { get; } = declarators;
+}
+
+public enum AssignOp
+{
+    Set,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Increment,
+    Decrement,
+}
+
+public static class AssignOpText
+{
+    public static string Source(this AssignOp op) => op switch
+    {
+        AssignOp.Set => "=",
+        AssignOp.Add => "+=",
+        AssignOp.Subtract => "-=",
+        AssignOp.Multiply => "*=",
+        AssignOp.Divide => "/=",
+        AssignOp.Remainder => "%=",
+        AssignOp.Increment => "++",
+        AssignOp.Decrement => "--",
+        _ => throw new ArgumentOutOfRangeException(nameof(op)),
+    };
+}
+
+public sealed class IfStmt(Expr condition, Stmt then, Stmt? @else, SourceLocation location) : Stmt(location)
+{
+    public Expr Condition { get; } = condition;
+    public Stmt Then { get; } = then;
+    public Stmt? Else { get; } = @else;
+}
+
+/// <summary>Common shape of while / do-while / for, with flow facts filled in by the checker.</summary>
+public abstract class LoopStmt(Stmt body, SourceLocation location) : Stmt(location)
+{
+    public Stmt Body { get; } = body;
+
+    /// <summary>Set by the checker: a 'break' targets this loop.</summary>
+    public bool UsesBreak { get; set; }
+
+    /// <summary>Set by the checker: a 'continue' targets this loop.</summary>
+    public bool UsesContinue { get; set; }
+}
+
+public sealed class WhileStmt(Expr condition, Stmt body, SourceLocation location) : LoopStmt(body, location)
+{
+    public Expr Condition { get; } = condition;
+}
+
+public sealed class DoWhileStmt(Stmt body, Expr condition, SourceLocation location) : LoopStmt(body, location)
+{
+    public Expr Condition { get; } = condition;
+}
+
+/// <summary>"for (init; condition; update) body". A missing condition means "true".</summary>
+public sealed class ForStmt(IReadOnlyList<Stmt> init, Expr? condition, IReadOnlyList<Stmt> update, Stmt body, SourceLocation location)
+    : LoopStmt(body, location)
+{
+    public IReadOnlyList<Stmt> Init { get; } = init;
+    public Expr? Condition { get; } = condition;
+    public IReadOnlyList<Stmt> Update { get; } = update;
+}
+
+public sealed class BreakStmt(SourceLocation location) : Stmt(location);
+
+public sealed class ContinueStmt(SourceLocation location) : Stmt(location);
 
 public sealed class LetStmt(string name, SourceLocation nameLocation, Expr initializer, SourceLocation location)
     : Stmt(location)
@@ -168,11 +272,15 @@ public sealed class ReturnStmt(Expr value, SourceLocation location) : Stmt(locat
     public Expr Value { get; } = value;
 }
 
-/// <summary>"name = value;" is parsed so that the checker can reject it with a precise message.</summary>
-public sealed class AssignStmt(string name, Expr value, SourceLocation location) : Stmt(location)
+/// <summary>"x = e;", "x += e;" (and -= *= /= %=), "x++;", "++x;", "x--;", "--x;". Value is null for ++/--.</summary>
+public sealed class AssignStmt(string name, AssignOp op, Expr? value, SourceLocation location) : Stmt(location)
 {
     public string Name { get; } = name;
-    public Expr Value { get; } = value;
+    public AssignOp Op { get; } = op;
+    public Expr? Value { get; } = value;
+
+    /// <summary>Set by the checker when the target is an assignable variable.</summary>
+    public ValueSymbol? Symbol { get; set; }
 }
 
 // ---------------------------------------------------------------- declarations
@@ -242,12 +350,18 @@ public sealed class LambdaSymbol(string name, SourceLocation declaredAt, IReadOn
     public FcType? ReturnType { get; } = returnType;
 }
 
-public sealed class ValueSymbol(string name, SourceLocation declaredAt, FcType? type, string kind)
+public sealed class ValueSymbol(string name, SourceLocation declaredAt, FcType? type, string kind, bool isMutable)
     : Symbol(name, declaredAt)
 {
     /// <summary>Null when the initializer had a type error (suppresses cascading errors).</summary>
     public FcType? Type { get; } = type;
 
-    /// <summary>"parameter", "local binding" or "lambda parameter" (used in messages).</summary>
+    /// <summary>"parameter", "variable", "let binding" or "lambda parameter" (used in messages).</summary>
     public string Kind { get; } = kind;
+
+    /// <summary>True for C-style typed variables and function parameters; false for 'let' and lambda parameters.</summary>
+    public bool IsMutable { get; } = isMutable;
+
+    /// <summary>Set by the checker when some statement assigns to it; such variables are emitted as 'let mutable'.</summary>
+    public bool IsAssigned { get; set; }
 }

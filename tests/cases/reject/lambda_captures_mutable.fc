@@ -1,0 +1,10 @@
+int main()
+{
+    int count = 0;
+    let show = () => count + 1;
+    count++;
+    print(show());
+    return 0;
+}
+
+//! error: FC3017 4:22 a lambda cannot capture 'count'

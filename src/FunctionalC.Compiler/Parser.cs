@@ -76,8 +76,7 @@ public sealed class Parser
                 $"'{Current.Text}' is a reserved C keyword and cannot be used as a name");
         }
 
-        if (kind == TokenKind.Identifier && Current.Kind is TokenKind.KwInt or TokenKind.KwBool or TokenKind.KwLet
-                or TokenKind.KwReturn or TokenKind.KwTrue or TokenKind.KwFalse)
+        if (kind == TokenKind.Identifier && Current.Kind is >= TokenKind.KwInt and <= TokenKind.KwContinue)
         {
             throw Error(Codes.Syntax, Current.Location,
                 $"expected {what} but found the keyword '{Current.Text}', which cannot be used as a name");
@@ -102,12 +101,10 @@ public sealed class Parser
         string w = token.Text;
         string message = w switch
         {
-            "if" or "else" or "switch" or "case" or "default" =>
-                $"'{w}' statements are not supported in version 0; use the conditional expression 'condition ? a : b'",
-            "while" or "for" or "do" =>
-                $"loops ('{w}') are not supported in version 0; use recursion",
-            "break" or "continue" or "goto" =>
-                $"'{w}' is not supported: version 0 has no loops or jumps",
+            "switch" or "case" or "default" =>
+                $"'{w}' is not supported yet; use 'if (...) {{ ... }} else if (...) {{ ... }} else {{ ... }}'",
+            "goto" =>
+                "'goto' is not supported; use loops with 'break' and 'continue'",
             "struct" or "union" or "enum" or "typedef" =>
                 $"'{w}' declarations are not supported in version 0",
             "void" =>
@@ -228,33 +225,72 @@ public sealed class Parser
 
     // ------------------------------------------------------------ statements
 
-    private Stmt ParseStatement(string functionName, Token openBrace)
+    private Stmt ParseStatement(string functionName, Token functionOpen)
     {
         var token = Current;
         switch (token.Kind)
         {
-            case TokenKind.KwLet:
+            case TokenKind.LBrace:
+                return ParseBlock(functionName, functionOpen);
+
+            case TokenKind.Semicolon:
+                Advance();
+                return new EmptyStmt(token.Location);
+
+            case TokenKind.KwIf:
             {
                 Advance();
-                var name = Expect(TokenKind.Identifier, "a name after 'let'");
-                if (Check(TokenKind.Colon))
+                var condition = ParseParenthesizedCondition("if");
+                var then = ParseStatement(functionName, functionOpen);
+                Stmt? @else = null;
+                if (Match(TokenKind.KwElse)) // binds to the nearest 'if' (the C "dangling else" rule)
                 {
-                    throw Error(Codes.UnsupportedFeature, Current.Location,
-                        "type annotations on 'let' are not supported; the binding's type is inferred from its initializer");
+                    @else = ParseStatement(functionName, functionOpen);
                 }
 
-                Expect(TokenKind.Assign, $"'=' after 'let {name.Text}'");
-                var initializer = ParseExpression();
-                ExpectSemicolon();
-                return new LetStmt(name.Text, name.Location, initializer, token.Location);
+                return new IfStmt(condition, then, @else, token.Location);
             }
+
+            case TokenKind.KwElse:
+                throw Error(Codes.Syntax, token.Location, "'else' without a matching 'if'");
+
+            case TokenKind.KwWhile:
+            {
+                Advance();
+                var condition = ParseParenthesizedCondition("while");
+                var body = ParseStatement(functionName, functionOpen);
+                return new WhileStmt(condition, body, token.Location);
+            }
+
+            case TokenKind.KwDo:
+            {
+                Advance();
+                var body = ParseStatement(functionName, functionOpen);
+                Expect(TokenKind.KwWhile, "'while' after the body of 'do'");
+                var condition = ParseParenthesizedCondition("while");
+                ExpectSemicolon();
+                return new DoWhileStmt(body, condition, token.Location);
+            }
+
+            case TokenKind.KwFor:
+                return ParseFor(functionName, functionOpen);
+
+            case TokenKind.KwBreak:
+                Advance();
+                ExpectSemicolon();
+                return new BreakStmt(token.Location);
+
+            case TokenKind.KwContinue:
+                Advance();
+                ExpectSemicolon();
+                return new ContinueStmt(token.Location);
 
             case TokenKind.KwReturn:
             {
                 Advance();
                 if (Check(TokenKind.Semicolon))
                 {
-                    throw Error(Codes.Syntax, token.Location, "'return' requires a value in version 0");
+                    throw Error(Codes.Syntax, token.Location, "'return' requires a value: every function returns 'int' or 'bool'");
                 }
 
                 var value = ParseExpression();
@@ -262,54 +298,211 @@ public sealed class Parser
                 return new ReturnStmt(value, token.Location);
             }
 
+            case TokenKind.KwLet:
+            {
+                var let = ParseLet();
+                ExpectSemicolon();
+                return let;
+            }
+
             case TokenKind.KwInt or TokenKind.KwBool:
             {
-                var next = PeekToken(1);
-                if (next.Kind == TokenKind.Star)
-                {
-                    throw PointerError(next);
-                }
-
-                if (next.Kind == TokenKind.Identifier && PeekToken(2).Kind == TokenKind.LParen)
+                if (PeekToken(1).Kind == TokenKind.Identifier && PeekToken(2).Kind == TokenKind.LParen)
                 {
                     throw Error(Codes.Syntax, token.Location,
-                        $"missing '}}' to close the body of '{functionName}' (opened at {openBrace.Location.Short}) before this function definition; nested functions are not supported");
+                        $"missing '}}' to close the body of '{functionName}' (opened at {functionOpen.Location.Short}) before this function definition; nested functions are not supported");
                 }
 
-                throw Error(Codes.UnsupportedFeature, token.Location,
-                    $"typed local declarations such as '{token.Text} x = ...;' are not supported; use 'let x = ...;' (bindings are immutable and their type is inferred)");
+                var declaration = ParseDeclaration();
+                ExpectSemicolon();
+                return declaration;
             }
 
             case TokenKind.ReservedWord:
                 throw Unsupported(token);
 
-            case TokenKind.LBrace:
-                throw Error(Codes.UnsupportedFeature, token.Location, "nested blocks '{ ... }' are not supported in version 0");
-
-            case TokenKind.Semicolon:
-                throw Error(Codes.Syntax, token.Location, "empty statement ';' is not allowed");
-
-            case TokenKind.Identifier when PeekToken(1).Kind == TokenKind.Assign:
-            {
-                Advance();
-                Advance();
-                var value = ParseExpression();
-                ExpectSemicolon();
-                return new AssignStmt(token.Text, value, token.Location);
-            }
-
             default:
             {
-                var expression = ParseExpression();
+                var statement = ParseSimpleStatement();
                 ExpectSemicolon();
-                return new ExprStmt(expression, token.Location);
+                return statement;
             }
         }
     }
 
+    private BlockStmt ParseBlock(string functionName, Token functionOpen)
+    {
+        var open = Advance(); // '{'
+        var statements = new List<Stmt>();
+        while (!Check(TokenKind.RBrace))
+        {
+            if (Check(TokenKind.EndOfFile))
+            {
+                throw Error(Codes.Syntax, Current.Location,
+                    $"expected '}}' to close the block opened at {open.Location.Short} but reached the end of the file");
+            }
+
+            statements.Add(ParseStatement(functionName, functionOpen));
+        }
+
+        Advance();
+        return new BlockStmt(statements, open.Location);
+    }
+
+    private Expr ParseParenthesizedCondition(string keyword)
+    {
+        Expect(TokenKind.LParen, $"'(' after '{keyword}'");
+        var condition = ParseExpression();
+        Expect(TokenKind.RParen, $"')' to close the '{keyword}' condition");
+        return condition;
+    }
+
+    private ForStmt ParseFor(string functionName, Token functionOpen)
+    {
+        var forToken = Advance();
+        Expect(TokenKind.LParen, "'(' after 'for'");
+
+        var init = new List<Stmt>();
+        if (Check(TokenKind.KwInt) || Check(TokenKind.KwBool))
+        {
+            init.Add(ParseDeclaration());
+        }
+        else if (Check(TokenKind.KwLet))
+        {
+            init.Add(ParseLet());
+        }
+        else if (!Check(TokenKind.Semicolon))
+        {
+            do
+            {
+                init.Add(ParseSimpleStatement());
+            }
+            while (Match(TokenKind.Comma));
+        }
+
+        Expect(TokenKind.Semicolon, "';' after the 'for' initializer");
+        Expr? condition = Check(TokenKind.Semicolon) ? null : ParseExpression();
+        Expect(TokenKind.Semicolon, "';' after the 'for' condition");
+
+        var update = new List<Stmt>();
+        if (!Check(TokenKind.RParen))
+        {
+            do
+            {
+                update.Add(ParseSimpleStatement());
+            }
+            while (Match(TokenKind.Comma));
+        }
+
+        Expect(TokenKind.RParen, "')' to close the 'for' header");
+        var body = ParseStatement(functionName, functionOpen);
+        return new ForStmt(init, condition, update, body, forToken.Location);
+    }
+
+    private LetStmt ParseLet()
+    {
+        var letToken = Advance();
+        var name = Expect(TokenKind.Identifier, "a name after 'let'");
+        if (Check(TokenKind.Colon))
+        {
+            throw Error(Codes.UnsupportedFeature, Current.Location,
+                "type annotations on 'let' are not supported; the binding's type is inferred from its initializer");
+        }
+
+        Expect(TokenKind.Assign, $"'=' after 'let {name.Text}'");
+        var initializer = ParseExpression();
+        return new LetStmt(name.Text, name.Location, initializer, letToken.Location);
+    }
+
+    /// <summary>"int a = 1, b = 2" (without the ';'). Every variable must be initialized.</summary>
+    private DeclarationStmt ParseDeclaration()
+    {
+        var typeToken = Current;
+        var type = ParseType("a variable declaration");
+        if (Check(TokenKind.Star))
+        {
+            throw PointerError(Current);
+        }
+
+        var declarators = new List<VarDeclarator>();
+        do
+        {
+            var name = Expect(TokenKind.Identifier, "a variable name");
+            if (!Check(TokenKind.Assign))
+            {
+                throw Error(Codes.UnsupportedFeature, name.Location,
+                    $"variable '{name.Text}' must be initialized, as in '{typeToken.Text} {name.Text} = ...;' (uninitialized variables are not supported)");
+            }
+
+            Advance();
+            var initializer = ParseExpression();
+            declarators.Add(new VarDeclarator(name.Text, name.Location, initializer));
+        }
+        while (Match(TokenKind.Comma));
+
+        return new DeclarationStmt(type, declarators, typeToken.Location);
+    }
+
+    /// <summary>
+    /// An assignment ("x = e", "x += e", ...), an increment/decrement ("x++", "++x", "x--", "--x"),
+    /// or an expression (only calls are accepted by the checker). No trailing ';'.
+    /// </summary>
+    private Stmt ParseSimpleStatement()
+    {
+        var token = Current;
+        if (token.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
+        {
+            Advance();
+            var target = Expect(TokenKind.Identifier, $"a variable name after '{token.Text}'");
+            return new AssignStmt(target.Text, token.Kind == TokenKind.PlusPlus ? AssignOp.Increment : AssignOp.Decrement, null, token.Location);
+        }
+
+        if (token.Kind == TokenKind.Identifier)
+        {
+            var next = PeekToken(1);
+            AssignOp? op = next.Kind switch
+            {
+                TokenKind.Assign => AssignOp.Set,
+                TokenKind.PlusAssign => AssignOp.Add,
+                TokenKind.MinusAssign => AssignOp.Subtract,
+                TokenKind.StarAssign => AssignOp.Multiply,
+                TokenKind.SlashAssign => AssignOp.Divide,
+                TokenKind.PercentAssign => AssignOp.Remainder,
+                TokenKind.PlusPlus => AssignOp.Increment,
+                TokenKind.MinusMinus => AssignOp.Decrement,
+                _ => null,
+            };
+            if (op is { } assignOp)
+            {
+                Advance();
+                Advance();
+                Expr? value = assignOp is AssignOp.Increment or AssignOp.Decrement ? null : ParseExpression();
+                return new AssignStmt(token.Text, assignOp, value, token.Location);
+            }
+        }
+
+        var expression = ParseExpression();
+        return new ExprStmt(expression, token.Location);
+    }
+
     // ------------------------------------------------------------ expressions
 
-    private Expr ParseExpression() => ParseConditional();
+    private Expr ParseExpression()
+    {
+        var expression = ParseConditional();
+        if (Current.Kind is TokenKind.Assign or TokenKind.PlusAssign or TokenKind.MinusAssign or TokenKind.StarAssign
+            or TokenKind.SlashAssign or TokenKind.PercentAssign)
+        {
+            throw Error(Codes.UnsupportedFeature, Current.Location,
+                $"'{Current.Text}' cannot be used here: assignment is a statement of its own ('x = e;') and only a plain variable name can be assigned (did you mean '==' to compare?)");
+        }
+
+        return expression;
+    }
+
+    private static CompileError IncrementInExpression(Token token) =>
+        Error(Codes.UnsupportedFeature, token.Location,
+            $"'{token.Text}' can only be used as a statement of its own, as in 'x{token.Text};', not inside an expression");
 
     private Expr ParseConditional()
     {
@@ -375,6 +568,9 @@ public sealed class Parser
                 Advance();
                 return new UnaryExpr(UnaryOp.Not, ParseUnary(), token.Location);
 
+            case TokenKind.PlusPlus or TokenKind.MinusMinus:
+                throw IncrementInExpression(token);
+
             case TokenKind.Plus:
                 throw Error(Codes.UnsupportedFeature, token.Location, "unary '+' is not supported in version 0");
 
@@ -416,6 +612,11 @@ public sealed class Parser
                 throw Error(Codes.UnsupportedFeature, paren.Location,
                     "only named functions and let-bound lambdas can be called, as in 'name(arguments)'");
             }
+        }
+
+        if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
+        {
+            throw IncrementInExpression(Current);
         }
 
         return expression;

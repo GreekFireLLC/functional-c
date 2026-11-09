@@ -1,0 +1,55 @@
+int main()
+{
+    // Classic counting loop.
+    int total = 0;
+    for (int i = 0; i < 5; i++) {
+        total += i;
+    }
+    print(total);
+
+    // Sibling loops can reuse the same variable name.
+    for (int i = 10; i > 7; i--) {
+        print(i);
+    }
+
+    // Two variables in the header, two updates.
+    for (int lo = 0, hi = 10; lo < hi; lo++, hi -= 2) {
+        print(lo * 100 + hi);
+    }
+
+    // Nested loops: count the pairs (i, j) with i < j < 5.
+    int pairs = 0;
+    for (int i = 0; i < 5; i++) {
+        for (int j = i + 1; j < 5; j++) {
+            pairs++;
+        }
+    }
+    print(pairs);
+
+    // Initializer and update that assign an existing variable; empty body.
+    int k = 0;
+    for (k = 1; k < 100; k *= 3) {
+    }
+    print(k);
+
+    // No condition: loops until break.
+    int steps = 0;
+    for (;;) {
+        steps++;
+        if (steps == 4) break;
+    }
+    print(steps);
+    return 0;
+}
+
+//! out: 10
+//! out: 10
+//! out: 9
+//! out: 8
+//! out: 10
+//! out: 108
+//! out: 206
+//! out: 304
+//! out: 10
+//! out: 243
+//! out: 4

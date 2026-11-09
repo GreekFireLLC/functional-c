@@ -4,4 +4,4 @@ int main()
     return 0;
 }
 
-//! error: FC3011 3:5 only calls can be used as statements
+//! error: FC3011 3:5 can be used as statements

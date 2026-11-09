@@ -1,0 +1,15 @@
+int sign(int x)
+{
+    if (x < 0) {
+        return -1;
+    } else if (x > 0) {
+        return 1;
+    }
+}
+
+int main()
+{
+    return sign(1);
+}
+
+//! error: FC3005 8:1 function 'sign' can reach its end without returning a value

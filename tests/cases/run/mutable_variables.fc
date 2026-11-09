@@ -1,0 +1,73 @@
+int main()
+{
+    int x = 10;
+    x += 5;
+    print(x);
+    x -= 3;
+    print(x);
+    x *= 2;
+    print(x);
+    x /= 5;
+    print(x);
+    x %= 3;
+    print(x);
+    x++;
+    ++x;
+    print(x);
+    x--;
+    --x;
+    print(x);
+    x = -7;
+    x /= 2;
+    print(x);
+
+    bool flag = false;
+    flag = !flag;
+    print(flag ? 1 : 0);
+
+    // let copies the current value; it does not follow later changes.
+    int counter = 1;
+    let snapshot = counter;
+    counter = 50;
+    print(snapshot);
+    print(counter);
+
+    // A lambda may capture an immutable copy of a mutable variable.
+    let frozen = counter;
+    let addFrozen = (int v) => v + frozen;
+    counter = 0;
+    print(addFrozen(1));
+
+    // A typed variable that is never assigned can be captured.
+    int constant = 7;
+    let addConstant = (int v) => v + constant;
+    print(addConstant(1));
+
+    // Nested blocks have their own scope; sibling blocks may reuse names.
+    {
+        int inner = 1;
+        print(inner);
+    }
+    {
+        int inner = 2;
+        print(inner);
+    }
+    return 0;
+}
+
+//! out: 15
+//! out: 12
+//! out: 24
+//! out: 4
+//! out: 1
+//! out: 3
+//! out: 1
+//! out: -3
+//! out: 1
+//! out: 1
+//! out: 50
+//! out: 51
+//! out: 8
+//! out: 1
+//! out: 2
+//! fs-contains: let constant = 7

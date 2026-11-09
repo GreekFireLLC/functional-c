@@ -3,4 +3,4 @@ int main()
     print(1);
 }
 
-//! error: FC3005 4:1 must end with 'return <expression>;'
+//! error: FC3005 4:1 can reach its end without returning a value

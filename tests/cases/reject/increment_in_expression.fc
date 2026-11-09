@@ -1,0 +1,8 @@
+int main()
+{
+    int i = 0;
+    print(i++);
+    return 0;
+}
+
+//! error: FC2002 4:12 '++' can only be used as a statement

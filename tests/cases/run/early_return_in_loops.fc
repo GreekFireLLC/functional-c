@@ -1,0 +1,78 @@
+// return inside loops (including nested loops) ends the whole function immediately.
+int findFirstDivisor(int n)
+{
+    for (int d = 2; d < n; d++) {
+        if (n % d == 0) {
+            return d;
+        }
+    }
+    return n;
+}
+
+int findPair(int target)
+{
+    for (int a = 1; a < 10; a++) {
+        for (int b = a; b < 10; b++) {
+            if (a * b == target) {
+                print(a);
+                print(b);
+                return a + b;
+            }
+        }
+    }
+    return -1;
+}
+
+int firstMultiple(int start, int k)
+{
+    while (true) {
+        if (start % k == 0) return start;
+        start++;
+    }
+}
+
+bool containsSeven(int n)
+{
+    do {
+        if (n % 10 == 7) return true;
+        n /= 10;
+    } while (n > 0);
+    return false;
+}
+
+int partialIf(int x)
+{
+    if (x > 0) {
+        if (x > 100) return 100;
+        print(x);
+    }
+    return 0;
+}
+
+int main()
+{
+    print(findFirstDivisor(91));
+    print(findFirstDivisor(13));
+    print(findPair(24));
+    print(findPair(97));
+    print(firstMultiple(10, 7));
+    print(containsSeven(1789) ? 1 : 0);
+    print(containsSeven(1234) ? 1 : 0);
+    print(partialIf(500));
+    print(partialIf(5));
+    return 0;
+}
+
+//! out: 7
+//! out: 13
+//! out: 3
+//! out: 8
+//! out: 11
+//! out: -1
+//! out: 14
+//! out: 1
+//! out: 0
+//! out: 100
+//! out: 5
+//! out: 0
+//! fs-contains: fc'returned <- true

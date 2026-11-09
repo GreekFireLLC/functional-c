@@ -1,0 +1,9 @@
+int main()
+{
+    for (let i = 0; i < 3; i++) {
+        print(i);
+    }
+    return 0;
+}
+
+//! error: FC3002 3:28 cannot assign to 'i'

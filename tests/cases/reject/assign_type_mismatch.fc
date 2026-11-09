@@ -1,0 +1,8 @@
+int main()
+{
+    int x = 0;
+    x = true;
+    return x;
+}
+
+//! error: FC3007 4:9 cannot assign a value of type bool to the int variable 'x'

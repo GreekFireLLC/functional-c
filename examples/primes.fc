@@ -1,0 +1,29 @@
+// Prints the primes below 50, then how many primes there are below 1000.
+bool isPrime(int n)
+{
+    if (n < 2) return false;
+    for (int d = 2; d * d <= n; d++) {
+        if (n % d == 0) return false;
+    }
+    return true;
+}
+
+int countPrimesBelow(int limit)
+{
+    int count = 0;
+    for (int n = 2; n < limit; n++) {
+        if (isPrime(n)) count++;
+    }
+    return count;
+}
+
+int main()
+{
+    for (int n = 2; n < 50; n++) {
+        if (isPrime(n)) {
+            print(n);
+        }
+    }
+    print(countPrimesBelow(1000));
+    return 0;
+}

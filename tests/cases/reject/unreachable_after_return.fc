@@ -5,4 +5,4 @@ int main()
     return 0;
 }
 
-//! error: FC3005 3:5 'return' must be the last statement
+//! error: FC3016 4:5 unreachable statement

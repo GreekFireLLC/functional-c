@@ -1,0 +1,8 @@
+int main()
+{
+    let x = 1;
+    x++;
+    return x;
+}
+
+//! error: FC3002 4:5 cannot assign to 'x': 'let' bindings are immutable

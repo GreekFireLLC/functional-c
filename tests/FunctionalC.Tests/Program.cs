@@ -146,6 +146,10 @@ internal static partial class Program
             () => RunProgramCase("examples/sum_squares.fc", "example-sum_squares",
                 new CaseSpec { Out = ["55"], Exit = "0" }));
 
+        yield return new TestCase("example: examples/primes.fc prints the primes below 50 and 168", "end-to-end",
+            () => RunProgramCase("examples/primes.fc", "example-primes",
+                new CaseSpec { Out = ["2", "3", "5", "7", "11", "13", "17", "19", "23", "29", "31", "37", "41", "43", "47", "168"], Exit = "0" }));
+
         foreach (var file in Directory.GetFiles(Path.Combine(_root, "tests", "cases", "run"), "*.fc").Order(StringComparer.Ordinal))
         {
             string relative = Relative(file);
@@ -535,11 +539,28 @@ internal static partial class Program
         ];
         Assert(kinds.SequenceEqual(expected), $"got {string.Join(", ", kinds)}");
 
+        var assignments = Lexer.Tokenize("a++b--c+=d-=e*=f/=g%=h=>i==j", "t.fc")
+            .Where(t => t.Kind != TokenKind.Identifier).Select(t => t.Kind).ToList();
+        TokenKind[] expectedAssignments =
+        [
+            TokenKind.PlusPlus, TokenKind.MinusMinus, TokenKind.PlusAssign, TokenKind.MinusAssign, TokenKind.StarAssign,
+            TokenKind.SlashAssign, TokenKind.PercentAssign, TokenKind.Arrow, TokenKind.EqualEqual, TokenKind.EndOfFile,
+        ];
+        Assert(assignments.SequenceEqual(expectedAssignments), $"got {string.Join(", ", assignments)}");
+
+        var keywords = Lexer.Tokenize("if else while for do break continue switch", "t.fc").Select(t => t.Kind).ToList();
+        TokenKind[] expectedKeywords =
+        [
+            TokenKind.KwIf, TokenKind.KwElse, TokenKind.KwWhile, TokenKind.KwFor, TokenKind.KwDo, TokenKind.KwBreak,
+            TokenKind.KwContinue, TokenKind.ReservedWord, TokenKind.EndOfFile,
+        ];
+        Assert(keywords.SequenceEqual(expectedKeywords), $"got {string.Join(", ", keywords)}");
+
         var located = Lexer.Tokenize("let x\n  = 42;", "t.fc");
         Assert(located[2].Kind == TokenKind.Assign && located[2].Location.Line == 2 && located[2].Location.Column == 3,
             $"'=' should be at 2:3 but was at {located[2].Location.Short}");
         Assert(located[3].IntValue == 42, "literal value");
-        return "<= >= == != && || ! => = < > tokenized correctly; line/column tracking verified";
+        return "<= >= == != && || ! => = < > ++ -- += -= *= /= %= and loop/if keywords tokenized correctly; line/column tracking verified";
     }
 
     private static async Task<string> ReferenceFixture()

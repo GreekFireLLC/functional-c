@@ -1,0 +1,50 @@
+// while loops with mutable variables; parameters are mutable local copies, as in C.
+int sumTo(int n)
+{
+    int total = 0;
+    int i = 1;
+    while (i <= n) {
+        total += i;
+        i++;
+    }
+    return total;
+}
+
+int countDown(int n)
+{
+    while (n > 0) {
+        print(n);
+        n--;
+    }
+    return n;
+}
+
+int gcd(int a, int b)
+{
+    while (b != 0) {
+        int t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+int main()
+{
+    print(sumTo(10));
+    print(sumTo(0));
+    print(countDown(3));
+    print(gcd(48, 36));
+    print(gcd(17, 5));
+    return 0;
+}
+
+//! out: 55
+//! out: 0
+//! out: 3
+//! out: 2
+//! out: 1
+//! out: 0
+//! out: 12
+//! out: 1
+//! fs-contains: let mutable n = n

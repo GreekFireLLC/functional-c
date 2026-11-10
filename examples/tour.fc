@@ -1,4 +1,5 @@
-// A short tour: an immutable binding, a lambda and recursion, then C-style variables, if and a loop.
+// A short tour: an immutable binding, a lambda and recursion,
+// then C-style variables, if and a loop.
 
 int sumSquares(int n)
 {

@@ -34,7 +34,7 @@ strings, `switch`, headers or preprocessor.
 | --- | --- |
 | `src/FunctionalC.Compiler/` | The translator (C# console app): `Lexer.cs`, `Parser.cs`, `Ast.cs`, `Checker.cs`, `Flow.cs`, `FSharpEmitter.cs`, `Translator.cs`, `Cli.cs` |
 | `examples/*.fc` | Example programs (see [Examples](#examples)) |
-| `examples/sum_squares.reference.fs` | The hand-written F# from the handoff, kept for comparison. It is not translator output and not part of any project. |
+| `examples/sum_squares.reference.fs` | A hand-written F# translation of `sum_squares.fc` from the original design notes, kept for comparison. It is not translator output and not part of any project. |
 | `generated/SampleApp/` | F# console project. Its `Program.fs` is **generated** by the translator. |
 | `tests/FunctionalC.Tests/` | Acceptance-test harness (a plain C# console app, no test framework) |
 | `tests/cases/run/*.fc` | Behavioral tests that are translated, compiled with F# and executed |
@@ -74,14 +74,15 @@ or interrupted translation never leaves a partial or corrupted `Program.fs`.
 
 ## Examples
 
-Each file in `examples/` is a complete program. Except for the handoff's `sum_squares.fc`, each one ends
+Each file in `examples/` is a complete program. Except for the original sample `sum_squares.fc`, each one ends
 with its expected output in `//! out:` lines. Those values were computed separately in Python, not copied
 from the translator's output. The test suite translates, compiles and runs every example and compares
 the output.
 
 | Program | What it computes | Shows |
 | --- | --- | --- |
-| `sum_squares.fc` | 1² + … + 5² = 55 | The handoff sample: recursion, a lambda, `?:` |
+| `sum_squares.fc` | 1² + … + 5² = 55 | The original sample: recursion, a lambda, `?:` |
+| `tour.fc` | 55 again, then the number of primes below 1000 (168) | A short tour of both halves of the language |
 | `primes.fc` | The primes below 50, and how many are below 1000 (168) | `for`, early `return`, `count++` |
 | `gcd_lcm.fc` | GCD of 1071 and 462, and the LCM of 1..20 (232792560) | Recursion vs. a loop, `while (b)` in C style |
 | `fibonacci.fc` | Fibonacci numbers, including fib(46), the largest that fits in an int | Naive recursion vs. a loop, a `bool` flag |
@@ -427,11 +428,34 @@ the `.fc` source. That would mean a translator bug, so please keep the `.fc` inp
 - `generated/SampleApp/Program.fs` is overwritten by every translation into it.
 - Known translation bugs: none found by the current test suite (see `TEST-RESULTS.md`).
 
-## Background
+## Related work and the name
 
-This folder was built afresh from the handoff document `Functional_C_Desktop_Handoff.md` one level up.
-An earlier conversation claimed that .NET SDK 8.0.415, a translator and test runs existed. None of those
-were available or verifiable, and none of that work is reused here. Version 1 then added C-style
-mutable variables, `if` and loops, keeping `let` immutable. Version 1.1 added C-style int conditions
-and the example programs, and version 1.2 let a `bool` be used as an `int`. The SDK, target framework
-and results recorded in `TEST-RESULTS.md` come from actual runs on this machine.
+This project is unrelated to *Functional C* by Pieter Hartel and Henk Muller (Addison Wesley Longman,
+1997). That textbook teaches C to programmers who already know a functional language
+([University of Twente record](https://research.utwente.nl/en/publications/functional-c)). Some
+neighbours of this project:
+
+- [SaC (Single Assignment C)](https://sac-home.org/): a purely functional array language with C-like
+  syntax, whose compiler generates C.
+- [Reason](https://reasonml.github.io/) and [ReScript](https://rescript-lang.org/): a familiar,
+  JavaScript-like syntax on top of OCaml, the closest idea to putting C syntax on top of F#.
+- [Fable](https://fable.io/): compiles F# to JavaScript and other languages.
+- [cs2fs](https://github.com/matthid/cs2fs): an experimental C#-to-F# transpiler.
+- In the other direction, functional languages such as [Koka](https://koka-lang.github.io/koka/doc/index.html),
+  [Lean 4](https://lean-lang.org/) and [CHICKEN Scheme](https://call-cc.org/) compile *to* C.
+
+## History
+
+Functional C began as a short design note: a C-shaped functional language whose translator, written in
+C#, emits readable F# that the .NET SDK compiles.
+
+- Version 0 implemented that note: expressions, functions, immutable bindings and lambdas.
+- Version 1 added C-style mutable variables, `if` and loops, keeping `let` immutable.
+- Version 1.1 added C-style int conditions and the example programs.
+- Version 1.2 let a `bool` be used as an `int`.
+
+The SDK, target framework and results recorded in `TEST-RESULTS.md` come from actual runs.
+
+## License
+
+[MIT](LICENSE) © 2026 Greek Fire LLC.

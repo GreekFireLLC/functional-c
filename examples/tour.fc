@@ -1,0 +1,31 @@
+// A short tour: an immutable binding, a lambda and recursion, then C-style variables, if and a loop.
+
+int sumSquares(int n)
+{
+    let square = (int x) => x * x;
+    return n <= 0 ? 0 : square(n) + sumSquares(n - 1);
+}
+
+bool isPrime(int n)
+{
+    if (n < 2) return false;
+    for (int d = 2; d * d <= n; d++) {
+        if (n % d == 0) return false;
+    }
+    return true;
+}
+
+int main()
+{
+    print(sumSquares(5));          // 55
+    int count = 0;
+    for (int n = 2; n < 1000; n++) {
+        if (isPrime(n)) count++;
+    }
+    print(count);                  // 168 primes below 1000
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 55
+//! out: 168

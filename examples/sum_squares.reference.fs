@@ -1,4 +1,4 @@
-// Hand-written reference translation of sum_squares.fc (from the handoff document).
+// Hand-written reference translation of sum_squares.fc (from the original design notes).
 // It is NOT translator output and is not part of any compiled project; it documents the intended behavior.
 module FunctionalCProgram
 

@@ -142,7 +142,7 @@ internal static partial class Program
 
     private static IEnumerable<TestCase> DiscoverTests()
     {
-        // sum_squares.fc is the handoff's sample and is kept exactly as given, so its expectation lives here.
+        // sum_squares.fc is the original sample and is kept exactly as first written, so its expectation lives here.
         yield return new TestCase("example: examples/sum_squares.fc prints 55", "end-to-end",
             () => RunProgramCase("examples/sum_squares.fc", "example-sum_squares",
                 new CaseSpec { Out = ["55"], Exit = "0" }));

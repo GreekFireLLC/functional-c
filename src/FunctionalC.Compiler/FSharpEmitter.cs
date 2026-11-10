@@ -540,7 +540,12 @@ public sealed class FSharpEmitter
     }
 
     /// <summary>Returns either an atom (name, non-negative literal, true/false) or a fully parenthesized expression.</summary>
-    private string EmitExpression(Expr expression) => expression switch
+    private string EmitExpression(Expr expression) =>
+        !expression.ConvertToInt ? EmitUnconverted(expression)
+        : expression is BoolLiteralExpr literal ? (literal.Value ? "1" : "0")
+        : $"(if {EmitUnconverted(expression)} then 1 else 0)"; // a bool where C expects an int: true is 1, false is 0
+
+    private string EmitUnconverted(Expr expression) => expression switch
     {
         IntLiteralExpr literal => literal.Value >= 0
             ? literal.Value.ToString(CultureInfo.InvariantCulture)

@@ -42,11 +42,11 @@ int main()
 
     int palindromes = 0;
     for (int n = 1; n < 10000; n++) {
-        if (isPalindrome(n)) palindromes++;
+        palindromes += isPalindrome(n);   // C style: a bool counts as 1 or 0
     }
     print(palindromes);                   // 198 = 9 + 9 + 90 + 90
 
-    print(isPalindrome(12321) ? 1 : 0);   // 1
+    print(isPalindrome(12321));           // 1: print shows true as 1
     return 0;
 }
 

@@ -1,5 +1,5 @@
-// An int counts as true or false only where a truth value is expected (conditions and logical
-// operators); it is not converted when it is stored in a bool.
+// An int counts as true or false in conditions and logical operators, but it is not converted when
+// it is stored in a bool (C would store nonzero as true). Write 'n != 0' or 'true' instead.
 int main()
 {
     bool flag = 1;

@@ -1,8 +1,0 @@
-int main()
-{
-    bool b = true;
-    let n = -b;
-    return 0;
-}
-
-//! error: FC3007 4:13 operator '-' expects an int operand but got bool

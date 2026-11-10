@@ -69,6 +69,12 @@ public abstract class Expr(SourceLocation location)
 
     /// <summary>Set by the checker; null if the expression had an error. The emitter uses it for C-style int conditions.</summary>
     public FcType? Type { get; set; }
+
+    /// <summary>
+    /// Set by the checker when this bool expression is used where an int is expected, which C allows
+    /// (true is 1 and false is 0). The emitter then converts it explicitly.
+    /// </summary>
+    public bool ConvertToInt { get; set; }
 }
 
 public sealed class IntLiteralExpr(long value, SourceLocation location) : Expr(location)

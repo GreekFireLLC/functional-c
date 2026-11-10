@@ -1,0 +1,12 @@
+// A bool parameter needs a bool argument; an int is not converted to bool when it is passed.
+bool isSet(bool flag)
+{
+    return flag;
+}
+
+int main()
+{
+    return isSet(1) ? 0 : 1;
+}
+
+//! error: FC3007 9:18 argument 1 of 'isSet' must be bool but has type int

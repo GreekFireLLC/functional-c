@@ -1,8 +1,9 @@
+// A bool can be stored in an int (as 0 or 1), but an int is not converted when it is stored in a bool.
 int main()
 {
-    int x = 0;
-    x = true;
-    return x;
+    bool done = false;
+    done = 1;
+    return 0;
 }
 
-//! error: FC3007 4:9 cannot assign a value of type bool to the int variable 'x'
+//! error: FC3007 5:12 cannot assign a value of type int to the bool variable 'done'

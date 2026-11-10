@@ -1,4 +1,4 @@
-# Functional C (prototype, version 1.1)
+# Functional C (prototype, version 1.2)
 
 Functional C is a small language with C syntax and functional features: immutable `let` bindings and
 lambdas alongside C's typed variables, `if`/`else` and loops. Its translator turns a `.fc` file into
@@ -15,6 +15,7 @@ Version history:
   `break`/`continue` and `return` anywhere.
 - **Version 1.1:** C-style conditions (`if (n)`, `while (1)`, `!n`, `a && b` with ints) and a set of
   example programs.
+- **Version 1.2:** a `bool` can be used wherever an `int` is expected, as 1 or 0 (`int found = a < b;`).
 
 It is still **not** compatible with arbitrary C programs: there are no pointers, arrays, structures,
 strings, `switch`, headers or preprocessor.
@@ -86,7 +87,7 @@ the output.
 | `fibonacci.fc` | Fibonacci numbers, including fib(46), the largest that fits in an int | Naive recursion vs. a loop, a `bool` flag |
 | `collatz.fc` | Collatz sequence lengths and the longest one below 10000 | `while`, `?:`, `if`/`else` on one line, `n /= 2` |
 | `perfect_numbers.fc` | The perfect numbers up to 10000, an amicable pair, and how many abundant numbers there are up to 100 | Divisor sums, chained `?:` |
-| `digits.fc` | Digit sums, reversed numbers, digital roots, and palindromes below 10000 | `/` and `%` loops |
+| `digits.fc` | Digit sums, reversed numbers, digital roots, and palindromes below 10000 | `/` and `%` loops, counting with `palindromes += isPalindrome(n);` |
 | `integer_sqrt.fc` | Integer square roots up to `isqrt(2147483647)` = 46340 | Binary search that can't overflow |
 | `modular_power.fc` | `base^exponent mod m`, and the Fermat pseudoprimes 341, 561 and 645 | Square-and-multiply with a loop and with recursion |
 | `fizzbuzz_numbers.fc` | FizzBuzz, printing -3, -5 and -15 in place of the words | Early returns, `else if` chains |
@@ -164,7 +165,7 @@ int main()
 | Lambdas | `(int x) => expr`, `(int a, bool b) => expr`, `() => expr`. A lambda can capture enclosing `let` bindings, parameters and variables that are never assigned, call other lambdas in scope, and call the enclosing function. |
 | Calls | `f(a, b)` for functions and let-bound lambdas |
 | Operators | Unary `-` and `!`. Binary `* / %`, `+ -`, `< <= > >=`, `== !=`, `&&`, `\|\|`, and `?:` |
-| Truth values | As in C, an `int` used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. These operators still produce a `bool`, not C's `int` 0 or 1. |
+| Truth values | As in C, an `int` used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. A `bool` used where an `int` is expected counts as 1 or 0 (`int found = a < b;`, `count += x > 0;`, `return a == b;`). An `int` is not converted when it is stored in a `bool`. |
 | `if` | `if (c) stmt`, `if (c) stmt else stmt`, `else if` chains. Braces are optional, and a dangling `else` binds to the nearest `if`. |
 | Loops | `while (c) stmt`, `do stmt while (c);`, `for (init; cond; update) stmt`. The `for` initializer can be declarations (`int i = 0, j = 10`) or assignments, the update can be several statements separated by commas, and any part can be empty (`for (;;)`). |
 | Jumps | `break;` and `continue;` (innermost loop), and `return expr;` anywhere |
@@ -195,21 +196,28 @@ Assignment and `++`/`--` aren't in this table because they are statements, not o
 
 The translator checks these rules itself:
 
-- Arithmetic and relational operators take `int` operands.
-- **Truth values.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands of `&&`,
-  `||` and `!`, may be `bool` or `int`. An `int` is true when it is not 0, as in C, so `while (1)`,
-  `if (n)`, `if (!n)` and `if (n % 2 && ok)` all work. `&&`, `||`, `!` and the comparisons always produce
-  `bool`.
-- **No conversion anywhere else.** An `int` isn't converted to `bool` when it is stored, passed or
-  returned (`bool b = 1;` is rejected; write `bool b = true;` or `bool b = n != 0;`). A `bool` is never
-  converted to `int` (`int isZero = !n;` is rejected; write `!n ? 1 : 0`).
-- `==` and `!=` need both operands to have the same type, so `n == true` is rejected.
-- Both branches of `?:` must have the same type.
-- An assigned or initialized value must match the variable's type. `+= -= *= /= %=` and `++`/`--` need
-  `int`.
-- `print` takes one `int` argument and produces no value, so it can only be used as a statement.
-- Call arity and argument types must match.
-- A `return` value must match the declared return type.
+- **Int as a truth value.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands of
+  `&&`, `||` and `!`, may be `bool` or `int`. An `int` is true when it is not 0, as in C, so
+  `while (1)`, `if (n)`, `if (!n)` and `if (n % 2 && ok)` all work. `&&`, `||`, `!` and the comparisons
+  produce a `bool`.
+- **Bool as an int.** As in C, a `bool` can be used wherever an `int` is expected, with `true` as 1 and
+  `false` as 0:
+  - initializing, assigning or compound-assigning an `int` variable (`int found = a < b;`,
+    `count += n % 2 == 0;`)
+  - passing it to an `int` parameter, or returning it from an `int` function (`return a == b;`)
+  - `print(flag)`, which prints 1 or 0
+  - an operand of `+ - * / %`, unary `-`, and `< <= > >=`, as in `(a < b) + (c < d)`
+- **`==` and `!=`.** Two `bool`s compare as `bool`s. A `bool` compared with an `int` counts as 0 or 1,
+  so `n == true` means `n == 1` and is false when `n` is 2. That is the same pitfall as in C; write
+  `if (n)` instead.
+- **`?:`.** Both branches have the same type, or one is `int` and the other `bool`, in which case the
+  result is an `int`.
+- **What isn't converted.** An `int` is never converted to `bool` when it is stored, passed or returned:
+  `bool b = 1;`, `b = 0;`, `isSet(1)` for a `bool` parameter, and `return n;` from a `bool` function are
+  rejected. C would accept them. Write `true`, `false` or `n != 0`.
+- `+= -= *= /= %=` and `++`/`--` need an `int` variable.
+- `print` takes one argument and produces no value, so it can only be used as a statement.
+- Call arity must match.
 
 ### Scope and mutability rules
 
@@ -298,6 +306,7 @@ matching operator.
 | `c ? a : b` | `(if c then a else b)` |
 | `==`, `!=`, `!x` | `=`, `<>`, `(fc'not x)` |
 | an `int` used as a truth value: `if (n)`, `!n`, `n && m` | `if (n <> 0) then`, `(n = 0)`, `((n <> 0) && (m <> 0))`. A literal becomes `true` or `false`, so `while (1)` becomes `while true do`. |
+| a `bool` used as an `int`: `int found = a < b;`, `print(true);` | `let found = (if (a < b) then 1 else 0)`, `fc'print 1` |
 | `f(x);` (call statement) | `fc'ignore (f x)` |
 | `print(e);` | `fc'print e` |
 | `int main()` | an ordinary `let main () : int =` plus a separate `[<EntryPoint>] let fc'entry (_args: string array) : int = main ()` |
@@ -377,7 +386,7 @@ tests/cases/reject/immutable_reassign.fc(4,5): error FC3002: cannot assign to 'x
 | FC3004 | Forward reference or mutual recursion |
 | FC3005 | A function can reach its end without returning a value |
 | FC3006 | Entry point: `main` missing, duplicated, not `int`, or has parameters |
-| FC3007 | Type mismatch |
+| FC3007 | Type mismatch: an `int` stored in, passed as or returned as a `bool`, or `+=` or `++` on a `bool` variable |
 | FC3008 | Wrong number of arguments |
 | FC3009 / FC3010 | A function used as a value / a value called as a function |
 | FC3011 | An expression statement that isn't a call, assignment or increment |
@@ -403,9 +412,9 @@ the `.fc` source. That would mean a translator bug, so please keep the `.fc` inp
   `while ((c = next()) != 0)` and `a[i++]`-style code isn't supported. The comma is allowed only between
   declarators and in a `for` header.
 - Variables must be initialized when declared.
-- `bool` and `int` convert only where C needs a truth value (see [Typing rules](#typing-rules)). So
-  `bool b = 1;`, `int isZero = !n;` and returning `a < b` from an `int` function are rejected, even
-  though C accepts them.
+- An `int` is not converted to `bool` when it is stored, passed or returned (see
+  [Typing rules](#typing-rules)). So `bool b = 1;` and `return n;` from a `bool` function are
+  rejected, even though C accepts them. The other direction, `bool` to `int`, works as in C.
 - No forward references or mutual recursion; a function can only call functions defined above it.
 - No shadowing, recursive lambdas, or first-class functions (you can't pass or return a function). A
   lambda can't capture a variable that is assigned.
@@ -424,5 +433,5 @@ This folder was built afresh from the handoff document `Functional_C_Desktop_Han
 An earlier conversation claimed that .NET SDK 8.0.415, a translator and test runs existed. None of those
 were available or verifiable, and none of that work is reused here. Version 1 then added C-style
 mutable variables, `if` and loops, keeping `let` immutable. Version 1.1 added C-style int conditions
-and the example programs. The SDK, target framework and results
-recorded in `TEST-RESULTS.md` come from actual runs on this machine.
+and the example programs, and version 1.2 let a `bool` be used as an `int`. The SDK, target framework
+and results recorded in `TEST-RESULTS.md` come from actual runs on this machine.

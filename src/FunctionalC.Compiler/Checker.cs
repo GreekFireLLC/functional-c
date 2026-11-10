@@ -266,11 +266,33 @@ public sealed class Checker
         return completes;
     }
 
+    /// <summary>
+    /// True if a value of type <paramref name="actual"/> may be used where <paramref name="expected"/> is required.
+    /// As in C, a bool is accepted where an int is expected (true is 1, false is 0); the expression is then marked
+    /// so the emitter converts it. An int is not accepted where a bool is stored, passed or returned. A null type
+    /// (an error already reported) is accepted, to avoid cascading errors.
+    /// </summary>
+    private static bool Accepts(FcType expected, Expr expression, FcType? actual)
+    {
+        if (actual is null || actual == expected)
+        {
+            return true;
+        }
+
+        if (expected == FcType.Int && actual == FcType.Bool)
+        {
+            expression.ConvertToInt = true;
+            return true;
+        }
+
+        return false;
+    }
+
     private bool CheckReturn(ReturnStmt ret, Scope scope)
     {
         var type = CheckExpression(ret.Value, scope);
         var function = _current!.Declaration;
-        if (type is not null && type != function.ReturnType)
+        if (!Accepts(function.ReturnType, ret.Value, type))
         {
             Error(Codes.TypeMismatch, ret.Value.Location,
                 $"function '{function.Name}' returns {function.ReturnType.Name()} but this expression has type {type.Name()}");
@@ -392,7 +414,7 @@ public sealed class Checker
             _pendingName = declarator.Name;
             var type = CheckExpression(declarator.Initializer, scope);
             _pendingName = null;
-            if (type is not null && type != declaration.Type)
+            if (!Accepts(declaration.Type, declarator.Initializer, type))
             {
                 Error(Codes.TypeMismatch, declarator.Initializer.Location,
                     $"cannot initialize the {declaration.Type.Name()} variable '{declarator.Name}' with a value of type {type.Name()}");
@@ -420,10 +442,10 @@ public sealed class Checker
                 assign.Symbol = variable;
                 if (assign.Op == AssignOp.Set)
                 {
-                    if (valueType is not null && variable.Type is not null && valueType != variable.Type)
+                    if (variable.Type is { } target && !Accepts(target, assign.Value!, valueType))
                     {
                         Error(Codes.TypeMismatch, assign.Value!.Location,
-                            $"cannot assign a value of type {valueType.Name()} to the {variable.Type.Name()} {variable.Kind} '{assign.Name}'");
+                            $"cannot assign a value of type {valueType.Name()} to the {target.Name()} {variable.Kind} '{assign.Name}'");
                     }
                 }
                 else
@@ -433,9 +455,9 @@ public sealed class Checker
                         Error(Codes.TypeMismatch, assign.Location, $"'{op}' needs an int variable, but '{assign.Name}' is bool");
                     }
 
-                    if (valueType is FcType.Bool)
+                    if (assign.Value is { } value && !Accepts(FcType.Int, value, valueType)) // a bool value counts as 0 or 1
                     {
-                        Error(Codes.TypeMismatch, assign.Value!.Location, $"'{op}' needs an int value but this expression has type bool");
+                        Error(Codes.TypeMismatch, value.Location, $"'{op}' needs an int value but this expression has type {valueType.Name()}");
                     }
                 }
 
@@ -497,9 +519,9 @@ public sealed class Checker
             return;
         }
 
-        if (types[0] is FcType.Bool)
+        if (!Accepts(FcType.Int, print.Arguments[0], types[0])) // print(true) prints 1, as printf("%d", ...) would
         {
-            Error(Codes.TypeMismatch, print.Arguments[0].Location, "'print' expects an int argument but this expression has type bool");
+            Error(Codes.TypeMismatch, print.Arguments[0].Location, $"'print' expects an int argument but this expression has type {types[0].Name()}");
         }
     }
 
@@ -577,7 +599,7 @@ public sealed class Checker
             case UnaryExpr unary:
             {
                 var operand = CheckExpression(unary.Operand, scope);
-                if (operand is not null && operand != FcType.Int)
+                if (!Accepts(FcType.Int, unary.Operand, operand))
                 {
                     Error(Codes.TypeMismatch, unary.Location,
                         $"operator '{unary.Op.Source()}' expects an int operand but got {operand.Name()}");
@@ -596,6 +618,12 @@ public sealed class Checker
                 var whenFalse = CheckExpression(conditional.WhenFalse, scope);
                 if (whenTrue is not null && whenFalse is not null && whenTrue != whenFalse)
                 {
+                    // As in C, an int branch and a bool branch give an int; the bool branch counts as 0 or 1.
+                    if (Accepts(FcType.Int, conditional.WhenTrue, whenTrue) && Accepts(FcType.Int, conditional.WhenFalse, whenFalse))
+                    {
+                        return FcType.Int;
+                    }
+
                     Error(Codes.TypeMismatch, conditional.QuestionLocation,
                         $"both branches of '?:' must have the same type, but they are {whenTrue.Name()} and {whenFalse.Name()}");
                     return null;
@@ -632,9 +660,10 @@ public sealed class Checker
         var right = CheckExpression(binary.Right, scope);
         string op = binary.Op.Source();
 
-        void Require(FcType expected, FcType? actual, string side)
+        // Arithmetic and relational operands are ints; as in C, a bool operand counts as 0 or 1.
+        void Require(FcType expected, Expr operand, FcType? actual, string side)
         {
-            if (actual is not null && actual != expected)
+            if (!Accepts(expected, operand, actual))
             {
                 Error(Codes.TypeMismatch, binary.OperatorLocation,
                     $"operator '{op}' expects {expected.Name()} operands but the {side} operand has type {actual.Name()}");
@@ -644,20 +673,22 @@ public sealed class Checker
         switch (binary.Op)
         {
             case BinaryOp.Add or BinaryOp.Subtract or BinaryOp.Multiply or BinaryOp.Divide or BinaryOp.Remainder:
-                Require(FcType.Int, left, "left");
-                Require(FcType.Int, right, "right");
+                Require(FcType.Int, binary.Left, left, "left");
+                Require(FcType.Int, binary.Right, right, "right");
                 return FcType.Int;
 
             case BinaryOp.Less or BinaryOp.LessEqual or BinaryOp.Greater or BinaryOp.GreaterEqual:
-                Require(FcType.Int, left, "left");
-                Require(FcType.Int, right, "right");
+                Require(FcType.Int, binary.Left, left, "left");
+                Require(FcType.Int, binary.Right, right, "right");
                 return FcType.Bool;
 
             case BinaryOp.Equal or BinaryOp.NotEqual:
+                // Two bools compare as bools. Mixed with an int, the bool counts as 0 or 1 as in C,
+                // so 'n == true' means 'n == 1' (false for n = 2).
                 if (left is not null && right is not null && left != right)
                 {
-                    Error(Codes.TypeMismatch, binary.OperatorLocation,
-                        $"operator '{op}' needs operands of the same type, but they are {left.Name()} and {right.Name()}");
+                    Require(FcType.Int, binary.Left, left, "left");
+                    Require(FcType.Int, binary.Right, right, "right");
                 }
 
                 return FcType.Bool;
@@ -704,7 +735,7 @@ public sealed class Checker
 
         for (int i = 0; i < argumentTypes.Count; i++)
         {
-            if (argumentTypes[i] is { } actual && actual != callable.ParameterTypes[i])
+            if (argumentTypes[i] is { } actual && !Accepts(callable.ParameterTypes[i], call.Arguments[i], actual))
             {
                 Error(Codes.TypeMismatch, call.Arguments[i].Location,
                     $"argument {i + 1} of '{call.Callee}' must be {callable.ParameterTypes[i].Name()} but has type {actual.Name()}");

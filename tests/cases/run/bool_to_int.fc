@@ -1,0 +1,83 @@
+// As in C, a bool can be used wherever an int is expected: true is 1 and false is 0.
+// That covers initialization, assignment, compound assignment, arguments, return values, print,
+// arithmetic and relational operands, == and != against an int, and ?: with one int branch.
+
+// Returning a comparison from an int function, as C code often does.
+int isPositive(int n)
+{
+    return n > 0;
+}
+
+int add(int a, int b)
+{
+    return a + b;
+}
+
+int countEvens(int limit)
+{
+    int count = 0;
+    for (int i = 1; i <= limit; i++) {
+        count += i % 2 == 0;           // adds 1 or 0
+    }
+    return count;
+}
+
+int main()
+{
+    int found = 3 < 5;
+    print(found);                      // 1
+    int isZero = !found;
+    print(isZero);                     // 0
+    print(isPositive(7));              // 1
+    print(isPositive(-7));             // 0
+    print(true);                       // 1
+    print(false);                      // 0
+    print(2 < 3 && 3 < 4);             // 1
+    print(add(true, 1 == 1));          // 2
+    print((1 < 2) + (2 < 3) + (3 < 2)); // 2
+    print(countEvens(10));             // 5
+
+    bool flag = true;
+    int x = 10;
+    x = flag;
+    print(x);                          // 1
+    x += flag;
+    x *= 5 > 3;
+    print(x);                          // 2
+    print(-flag);                      // -1
+
+    // Mixed with an int, true means 1, so 'x == true' is false when x is 2 (the same pitfall as in C).
+    print(x == true);                  // 0
+    print(1 == true);                  // 1
+    print(flag == true);               // 1: two bools compare as bools
+
+    print(flag ? 5 : false);           // 5: an int branch and a bool branch give an int
+    print(!flag ? 5 : false);          // 0
+    let both = (true < 2) + (false >= 0);
+    print(both);                       // 2: 1 < 2 and 0 >= 0 are both true
+    return 3 > 2;                      // exit code 1
+}
+
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 2
+//! out: 2
+//! out: 5
+//! out: 1
+//! out: 2
+//! out: -1
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 5
+//! out: 0
+//! out: 2
+//! exit: 1
+//! fs-contains: let found = (if (3 < 5) then 1 else 0)
+//! fs-contains: let isZero = (if (found = 0) then 1 else 0)
+//! fs-contains: fc'print 1

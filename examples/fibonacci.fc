@@ -29,7 +29,7 @@ int main()
     for (int n = 0; n <= 25; n++) {
         if (fibRecursive(n) != fibLoop(n)) agree = false;
     }
-    print(agree ? 1 : 0);           // 1
+    print(agree);                   // 1 (true)
     return 0;
 }
 

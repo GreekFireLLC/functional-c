@@ -8,3 +8,4 @@ int main()
 }
 
 //! error: FC3016 5:9 unreachable statement
+//! flags: --strict

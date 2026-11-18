@@ -1,0 +1,7 @@
+int main()
+{
+    let x = (long) 5;
+    return 0;
+}
+
+//! error: FC2002 3:14 type 'long' is not supported yet

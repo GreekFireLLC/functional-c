@@ -11,6 +11,10 @@ namespace FunctionalC.Tests;
 /// .fc file → translator CLI → generated .fs → `dotnet build` (warnings are errors) → run the program.
 /// Rejection tests check the CLI's exit code, diagnostics (code, line, column, message) and that no output was written.
 ///
+/// Directives in a case file: "//! out:", "//! exit:", "//! stderr-contains:", "//! fs-contains:", "//! fs-lacks:",
+/// "//! error: FCnnnn line:col text", "//! warning: FCnnnn line:col text" (a behavioral test must list every
+/// warning the translator gives) and "//! flags: --strict".
+///
 /// Usage: dotnet run --project tests/FunctionalC.Tests -- [--report path.md] [--filter text] [--parallel n]
 /// </summary>
 internal static partial class Program
@@ -200,7 +204,10 @@ internal static partial class Program
         public string Exit { get; set; } = "0";
         public List<string> StderrContains { get; } = [];
         public List<string> FsContains { get; } = [];
+        public List<string> FsLacks { get; } = [];
         public List<ExpectedError> Errors { get; } = [];
+        public List<ExpectedError> Warnings { get; } = [];
+        public bool Strict { get; set; }
 
         public static CaseSpec Parse(string[] lines)
         {
@@ -222,14 +229,24 @@ internal static partial class Program
                     case "exit": spec.Exit = value; break;
                     case "stderr-contains": spec.StderrContains.Add(value); break;
                     case "fs-contains": spec.FsContains.Add(value); break;
-                    case "error":
+                    case "fs-lacks": spec.FsLacks.Add(value); break;
+                    case "flags":
+                        if (value != "--strict")
+                        {
+                            throw new InvalidOperationException($"unknown flags '{value}' (only --strict is supported)");
+                        }
+
+                        spec.Strict = true;
+                        break;
+                    case "error" or "warning":
                         var m = ErrorDirective().Match(value);
                         if (!m.Success)
                         {
-                            throw new InvalidOperationException($"bad error directive: {value}");
+                            throw new InvalidOperationException($"bad {key} directive: {value}");
                         }
 
-                        spec.Errors.Add(new ExpectedError(m.Groups[1].Value, int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture),
+                        (key == "error" ? spec.Errors : spec.Warnings).Add(new ExpectedError(m.Groups[1].Value,
+                            int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture),
                             int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture), m.Groups[4].Value));
                         break;
                     default:
@@ -249,9 +266,9 @@ internal static partial class Program
         public override string ToString() => $"{Code} at {Line}:{Column} containing \"{Contains}\"";
     }
 
-    private sealed record ParsedDiagnostic(string File, int Line, int Column, string Code, string Message);
+    private sealed record ParsedDiagnostic(string File, int Line, int Column, bool IsWarning, string Code, string Message);
 
-    [GeneratedRegex(@"^(?<file>.+)\((?<line>\d+),(?<col>\d+)\): error (?<code>FC\d{4}): (?<msg>.*)$")]
+    [GeneratedRegex(@"^(?<file>.+)\((?<line>\d+),(?<col>\d+)\): (?<severity>error|warning) (?<code>FC\d{4}): (?<msg>.*)$")]
     private static partial Regex DiagnosticLine();
 
     private static List<ParsedDiagnostic> ParseDiagnostics(string stderr) =>
@@ -259,16 +276,21 @@ internal static partial class Program
             .Select(l => DiagnosticLine().Match(l.TrimEnd('\r')))
             .Where(m => m.Success)
             .Select(m => new ParsedDiagnostic(m.Groups["file"].Value, int.Parse(m.Groups["line"].Value, CultureInfo.InvariantCulture),
-                int.Parse(m.Groups["col"].Value, CultureInfo.InvariantCulture), m.Groups["code"].Value, m.Groups["msg"].Value))
+                int.Parse(m.Groups["col"].Value, CultureInfo.InvariantCulture), m.Groups["severity"].Value == "warning",
+                m.Groups["code"].Value, m.Groups["msg"].Value))
             .ToList();
+
+    private static bool Matches(ParsedDiagnostic actual, ExpectedError expected) =>
+        actual.Code == expected.Code && actual.Line == expected.Line && actual.Column == expected.Column
+        && actual.Message.Contains(expected.Contains, StringComparison.Ordinal);
 
     // ------------------------------------------------------------ pipeline helpers
 
-    private static (int Exit, string Stdout, string Stderr) TranslateWithCli(string input, string output)
+    private static (int Exit, string Stdout, string Stderr) TranslateWithCli(string input, string output, bool strict = false)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        int exit = Cli.Run([input, "--out", output], stdout, stderr);
+        int exit = Cli.Run(strict ? [input, "--out", output, "--strict"] : [input, "--out", output], stdout, stderr);
         return (exit, stdout.ToString(), stderr.ToString());
     }
 
@@ -352,8 +374,19 @@ internal static partial class Program
         string project = CreateFSharpProject(directory);
         string output = Path.Combine(directory, "Program.fs");
 
-        var translate = TranslateWithCli(input, output);
+        var translate = TranslateWithCli(input, output, spec.Strict);
         Assert(translate.Exit == Cli.Success, $"translation of {input} failed (exit {translate.Exit}):\n{translate.Stderr}");
+
+        // A successful translation may warn. Every warning must be expected, so a new one cannot slip in unnoticed.
+        var warnings = ParseDiagnostics(translate.Stderr);
+        Assert(warnings.All(w => w.IsWarning), $"a successful translation reported an error:\n{translate.Stderr}");
+        foreach (var expected in spec.Warnings)
+        {
+            Assert(warnings.Any(w => Matches(w, expected)), $"expected warning {expected}\nactual stderr:\n{translate.Stderr}");
+        }
+
+        Assert(warnings.Count == spec.Warnings.Count,
+            $"expected {spec.Warnings.Count} warning(s) but the translator gave {warnings.Count}:\n{translate.Stderr}");
 
         string fsharp = File.ReadAllText(output);
         foreach (var fragment in spec.FsContains)
@@ -361,9 +394,18 @@ internal static partial class Program
             Assert(fsharp.Contains(fragment, StringComparison.Ordinal), $"generated F# does not contain '{fragment}':\n{fsharp}");
         }
 
+        foreach (var fragment in spec.FsLacks)
+        {
+            Assert(!fsharp.Contains(fragment, StringComparison.Ordinal), $"generated F# should not contain '{fragment}':\n{fsharp}");
+        }
+
         var run = await BuildAndRun(directory, project);
         string expectedStdout = string.Concat(spec.Out.Select(l => l + "\n"));
         string summary = $"exit code {run.Exit}; stdout {(run.Stdout.Length == 0 ? "(empty)" : string.Join(" | ", run.Stdout.TrimEnd('\n').Split('\n')))}";
+        if (warnings.Count > 0)
+        {
+            summary += $"; {warnings.Count} translator warning(s): {string.Join(", ", warnings.Select(w => $"{w.Code} at {w.Line}:{w.Column}"))}";
+        }
 
         // Exact comparison: print writes "\n" (not the platform newline), so stdout must match byte for byte.
         Assert(run.Stdout == expectedStdout,
@@ -401,7 +443,7 @@ internal static partial class Program
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "Program.fs");
 
-        var translate = TranslateWithCli(input, output);
+        var translate = TranslateWithCli(input, output, spec.Strict);
         Assert(translate.Exit == Cli.SourceErrors, $"expected exit code {Cli.SourceErrors} but got {translate.Exit}\n{translate.Stdout}{translate.Stderr}");
         Assert(!File.Exists(output), "the output file was written even though translation failed");
         Assert(Directory.GetFiles(directory).Length == 0, $"translation left files behind: {string.Join(", ", Directory.GetFiles(directory))}");
@@ -415,9 +457,7 @@ internal static partial class Program
 
         foreach (var expected in spec.Errors)
         {
-            bool found = diagnostics.Any(d => d.Code == expected.Code && d.Line == expected.Line && d.Column == expected.Column
-                                              && d.Message.Contains(expected.Contains, StringComparison.Ordinal));
-            Assert(found, $"expected {expected}\nactual stderr:\n{translate.Stderr}");
+            Assert(diagnostics.Any(d => !d.IsWarning && Matches(d, expected)), $"expected {expected}\nactual stderr:\n{translate.Stderr}");
         }
 
         return string.Join("\n", translate.Stderr.TrimEnd().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => DiagnosticLine().IsMatch(l)));
@@ -490,6 +530,7 @@ internal static partial class Program
             (["examples/sum_squares.fc"], Cli.UsageError),
             (["examples/sum_squares.fc", "--out"], Cli.UsageError),
             (["--bogus"], Cli.UsageError),
+            (["--strict"], Cli.UsageError),
             (["a.fc", "b.fc", "--out", "c.fs"], Cli.UsageError),
             (["tests/does-not-exist.fc", "--out", Path.Combine(directory, "x.fs")], Cli.IoError),
             (["--help"], Cli.Success),

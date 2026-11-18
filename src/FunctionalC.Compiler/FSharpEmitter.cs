@@ -19,6 +19,9 @@ public static class FSharpNames
     public const string Print = "fc'print";
     public const string Ignore = "fc'ignore";
     public const string Not = "fc'not";
+    public const string ToInt = "fc'int";
+    public const string ToChar = "fc'char";
+    public const string ToUChar = "fc'uchar";
     public const string EntryPoint = "fc'entry";
     public const string TempPrefix = "fc't";
 
@@ -87,6 +90,11 @@ public sealed class FSharpEmitter
         Line("/// Logical negation for the '!' operator.");
         Line($"let inline {FSharpNames.Not} (value: bool) : bool = not value");
         Line();
+        Line("/// C's conversions between integer types. Narrowing to 8 bits wraps around, as on the common C compilers.");
+        Line($"let inline {FSharpNames.ToInt} value : int = int value");
+        Line($"let inline {FSharpNames.ToChar} value : sbyte = sbyte value");
+        Line($"let inline {FSharpNames.ToUChar} value : byte = byte value");
+        Line();
         Line("// Program");
         Line();
 
@@ -114,7 +122,15 @@ public sealed class FSharpEmitter
 
     private void Line(string text = "") => _out.Append(text).Append('\n');
 
-    private static string TypeName(FcType type) => type == FcType.Int ? "int" : "bool";
+    /// <summary>C's char is an 8-bit integer, so it maps to sbyte (and unsigned char to byte), not to F#'s 16-bit char.</summary>
+    private static string TypeName(FcType type) => type switch
+    {
+        FcType.Int => "int",
+        FcType.Bool => "bool",
+        FcType.Char => "sbyte",
+        FcType.UChar => "byte",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
 
     private void EmitFunction(FunctionDecl function)
     {
@@ -165,7 +181,14 @@ public sealed class FSharpEmitter
             ? " ()"
             : string.Concat(parameters.Select(p => $" ({p.Symbol!.FSharpName}: {TypeName(p.Type)})"));
 
-    private static string DefaultValue(FcType type) => type == FcType.Int ? "0" : "false";
+    private static string DefaultValue(FcType type) => type switch
+    {
+        FcType.Int => "0",
+        FcType.Bool => "false",
+        FcType.Char => "0y",
+        FcType.UChar => "0uy",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
 
     // ------------------------------------------------------------ statements
     //
@@ -386,22 +409,34 @@ public sealed class FSharpEmitter
         }
     }
 
+    /// <summary>
+    /// A compound assignment to a char computes in int and narrows the result, as in C:
+    /// "c += e" is "c = (char) ((int) c + e)", so "c++" on a char holding 127 gives -128.
+    /// </summary>
     private string EmitAssignment(AssignStmt assign)
     {
         string name = assign.Symbol!.FSharpName;
-        string value = assign.Op switch
+        if (assign.Op == AssignOp.Set)
         {
-            AssignOp.Set => EmitExpression(assign.Value!),
-            AssignOp.Increment => $"({name} + 1)",
-            AssignOp.Decrement => $"({name} - 1)",
-            AssignOp.Add => $"({name} + {EmitExpression(assign.Value!)})",
-            AssignOp.Subtract => $"({name} - {EmitExpression(assign.Value!)})",
-            AssignOp.Multiply => $"({name} * {EmitExpression(assign.Value!)})",
-            AssignOp.Divide => $"({name} / {EmitExpression(assign.Value!)})",
-            AssignOp.Remainder => $"({name} % {EmitExpression(assign.Value!)})",
+            return $"{name} <- {EmitExpression(assign.Value!)}";
+        }
+
+        string op = assign.Op switch
+        {
+            AssignOp.Increment or AssignOp.Add => "+",
+            AssignOp.Decrement or AssignOp.Subtract => "-",
+            AssignOp.Multiply => "*",
+            AssignOp.Divide => "/",
+            AssignOp.Remainder => "%",
             _ => throw new InvalidOperationException($"unexpected assignment operator {assign.Op}"),
         };
-        return $"{name} <- {value}";
+        string operand = assign.Value is { } value ? EmitExpression(value) : "1";
+        return assign.Symbol.Type switch
+        {
+            FcType.Char => $"{name} <- ({FSharpNames.ToChar} (({FSharpNames.ToInt} {name}) {op} {operand}))",
+            FcType.UChar => $"{name} <- ({FSharpNames.ToUChar} (({FSharpNames.ToInt} {name}) {op} {operand}))",
+            _ => $"{name} <- ({name} {op} {operand})",
+        };
     }
 
     private List<string> EmitIf(IfStmt branch, Context context)
@@ -541,9 +576,59 @@ public sealed class FSharpEmitter
 
     /// <summary>Returns either an atom (name, non-negative literal, true/false) or a fully parenthesized expression.</summary>
     private string EmitExpression(Expr expression) =>
-        !expression.ConvertToInt ? EmitUnconverted(expression)
-        : expression is BoolLiteralExpr literal ? (literal.Value ? "1" : "0")
-        : $"(if {EmitUnconverted(expression)} then 1 else 0)"; // a bool where C expects an int: true is 1, false is 0
+        expression.ConvertTo is { } target ? EmitConverted(expression, target) : EmitUnconverted(expression);
+
+    private static string Literal(long value, string suffix)
+    {
+        string text = value.ToString(CultureInfo.InvariantCulture) + suffix;
+        return value >= 0 ? text : $"({text})";
+    }
+
+    /// <summary>
+    /// One of C's implicit conversions, written out because F# has none. A literal is converted here, at
+    /// translation time; anything else is converted by the generated code.
+    /// <list type="bullet">
+    /// <item>bool to a number: true is 1 and false is 0.</item>
+    /// <item>a number to bool: true when it is not 0.</item>
+    /// <item>char or unsigned char to int: the value is kept (integer promotion).</item>
+    /// <item>int to char or unsigned char: the low 8 bits are kept, so 200 stored in a char is -56.</item>
+    /// </list>
+    /// </summary>
+    private string EmitConverted(Expr expression, FcType target)
+    {
+        if (expression.Type is not { } source || source == target)
+        {
+            return EmitUnconverted(expression);
+        }
+
+        switch (expression)
+        {
+            case IntLiteralExpr number:
+                return target switch
+                {
+                    FcType.Bool => number.Value != 0 ? "true" : "false",
+                    FcType.Char => Literal(unchecked((sbyte)number.Value), "y"),
+                    FcType.UChar => Literal(unchecked((byte)number.Value), "uy"),
+                    _ => EmitUnconverted(expression),
+                };
+            case BoolLiteralExpr boolean:
+                return Literal(boolean.Value ? 1 : 0, target switch { FcType.Char => "y", FcType.UChar => "uy", _ => "" });
+        }
+
+        string code = EmitUnconverted(expression);
+        return (source, target) switch
+        {
+            (FcType.Bool, FcType.Int) => $"(if {code} then 1 else 0)",
+            (FcType.Bool, FcType.Char) => $"(if {code} then 1y else 0y)",
+            (FcType.Bool, FcType.UChar) => $"(if {code} then 1uy else 0uy)",
+            (FcType.Int, FcType.Bool) => $"({code} <> 0)",
+            (FcType.Char, FcType.Bool) => $"({code} <> 0y)",
+            (FcType.UChar, FcType.Bool) => $"({code} <> 0uy)",
+            (_, FcType.Int) => $"({FSharpNames.ToInt} {code})",
+            (_, FcType.Char) => $"({FSharpNames.ToChar} {code})",
+            _ => $"({FSharpNames.ToUChar} {code})",
+        };
+    }
 
     private string EmitUnconverted(Expr expression) => expression switch
     {
@@ -554,7 +639,10 @@ public sealed class FSharpEmitter
         NameExpr name => name.Symbol!.FSharpName,
         UnaryExpr { Op: UnaryOp.Negate } unary => $"(-{EmitExpression(unary.Operand)})",
         UnaryExpr { Op: UnaryOp.Not, Operand.Type: FcType.Int } unary => $"({EmitExpression(unary.Operand)} = 0)", // C: !n
+        UnaryExpr { Op: UnaryOp.Not, Operand.Type: FcType.Char } unary => $"({EmitExpression(unary.Operand)} = 0y)",
+        UnaryExpr { Op: UnaryOp.Not, Operand.Type: FcType.UChar } unary => $"({EmitExpression(unary.Operand)} = 0uy)",
         UnaryExpr { Op: UnaryOp.Not } unary => $"({FSharpNames.Not} {EmitExpression(unary.Operand)})",
+        CastExpr cast => EmitExpression(cast.Operand), // the checker recorded the conversion on the operand
         BinaryExpr binary => EmitBinary(binary),
         ConditionalExpr conditional =>
             $"(if {EmitCondition(conditional.Condition)} then {EmitExpression(conditional.WhenTrue)} else {EmitExpression(conditional.WhenFalse)})",
@@ -564,15 +652,10 @@ public sealed class FSharpEmitter
     };
 
     /// <summary>
-    /// An expression used as a truth value (a condition, or an operand of &amp;&amp; or ||). A C-style int becomes an
+    /// An expression used as a truth value (a condition, or an operand of &amp;&amp; or ||). A C-style number becomes an
     /// explicit comparison with 0, since F# has no int-to-bool conversion; an int literal becomes true or false.
     /// </summary>
-    private string EmitCondition(Expr condition) => condition switch
-    {
-        { Type: not FcType.Int } => EmitExpression(condition),
-        IntLiteralExpr literal => literal.Value != 0 ? "true" : "false",
-        _ => $"({EmitExpression(condition)} <> 0)",
-    };
+    private string EmitCondition(Expr condition) => EmitConverted(condition, FcType.Bool);
 
     private string NewTemp() => FSharpNames.TempPrefix + (++_tempCounter).ToString(CultureInfo.InvariantCulture);
 
@@ -642,6 +725,7 @@ public sealed class FSharpEmitter
         BinaryExpr { Op: BinaryOp.Divide or BinaryOp.Remainder } => true,
         BinaryExpr binary => MayHaveEffects(binary.Left) || MayHaveEffects(binary.Right),
         UnaryExpr unary => MayHaveEffects(unary.Operand),
+        CastExpr cast => MayHaveEffects(cast.Operand),
         ConditionalExpr conditional => MayHaveEffects(conditional.Condition)
                                        || MayHaveEffects(conditional.WhenTrue)
                                        || MayHaveEffects(conditional.WhenFalse),

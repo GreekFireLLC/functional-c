@@ -9,3 +9,4 @@ int main()
 }
 
 //! error: FC3007 3:12 function 'positive' returns bool but this expression has type int
+//! flags: --strict

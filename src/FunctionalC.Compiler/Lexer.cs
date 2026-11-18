@@ -6,11 +6,14 @@ public enum TokenKind
 {
     Identifier,
     IntLiteral,
-    /// <summary>A C keyword that version 0 does not support (if, while, void, struct, ...).</summary>
+    /// <summary>A C keyword that is not supported yet (switch, void, struct, ...).</summary>
     ReservedWord,
 
     KwInt,
     KwBool,
+    KwChar,
+    KwSigned,
+    KwUnsigned,
     KwLet,
     KwReturn,
     KwTrue,
@@ -90,6 +93,10 @@ public sealed class Lexer
     {
         ["int"] = TokenKind.KwInt,
         ["bool"] = TokenKind.KwBool,
+        ["_Bool"] = TokenKind.KwBool, // C99's own spelling of bool
+        ["char"] = TokenKind.KwChar,
+        ["signed"] = TokenKind.KwSigned,
+        ["unsigned"] = TokenKind.KwUnsigned,
         ["let"] = TokenKind.KwLet,
         ["return"] = TokenKind.KwReturn,
         ["true"] = TokenKind.KwTrue,
@@ -107,8 +114,8 @@ public sealed class Lexer
     public static readonly IReadOnlySet<string> ReservedCWords = new HashSet<string>(StringComparer.Ordinal)
     {
         "switch", "case", "default", "goto",
-        "struct", "union", "enum", "typedef", "void", "char", "short", "long", "float", "double",
-        "unsigned", "signed", "_Bool", "const", "static", "extern", "auto", "register", "volatile",
+        "struct", "union", "enum", "typedef", "void", "short", "long", "float", "double",
+        "const", "static", "extern", "auto", "register", "volatile",
         "inline", "restrict", "sizeof",
     };
 
@@ -164,6 +171,10 @@ public sealed class Lexer
             if (char.IsAsciiDigit(c))
             {
                 tokens.Add(LexNumber());
+            }
+            else if (c == '\'')
+            {
+                tokens.Add(LexCharacter());
             }
             else if (char.IsAsciiLetter(c) || c == '_')
             {
@@ -251,7 +262,7 @@ public sealed class Lexer
 
         if (Peek() == '.')
         {
-            throw Error(Codes.InvalidLiteral, start, "floating-point literals are not supported in version 0; only 'int' and 'bool' exist");
+            throw Error(Codes.InvalidLiteral, start, "floating-point literals are not supported yet; the number types are 'int', 'char' and 'unsigned char'");
         }
 
         if (digits.Length > 1 && digits[0] == '0')
@@ -267,6 +278,73 @@ public sealed class Lexer
         }
 
         return new Token(TokenKind.IntLiteral, digits, start, long.Parse(digits, CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// A character literal such as 'a' or '\n'. As in C, its type is int and its value is the character's
+    /// code, so it becomes an integer literal token. Only ASCII characters and the simple escapes are accepted.
+    /// </summary>
+    private Token LexCharacter()
+    {
+        var start = Here;
+        int begin = _pos;
+        Advance(); // opening quote
+        char c = Peek();
+        long value;
+        if (c is '\0' or '\n' or '\r')
+        {
+            throw Error(Codes.InvalidLiteral, start, "unterminated character literal: expected a character and a closing quote");
+        }
+
+        if (c == '\'')
+        {
+            throw Error(Codes.InvalidLiteral, start, "empty character literal; write one character between the quotes, as in 'a'");
+        }
+
+        if (c == '\\')
+        {
+            Advance();
+            char escape = Peek();
+            value = escape switch
+            {
+                'n' => 10,
+                't' => 9,
+                'r' => 13,
+                '0' => 0,
+                'a' => 7,
+                'b' => 8,
+                'f' => 12,
+                'v' => 11,
+                '\\' => 92,
+                '\'' => 39,
+                '"' => 34,
+                '?' => 63,
+                _ => throw Error(Codes.InvalidLiteral, start,
+                    "unsupported escape sequence in a character literal; the supported ones are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\' \\\" and \\?"),
+            };
+            if (escape == '0' && char.IsAsciiDigit(Peek(1)))
+            {
+                throw Error(Codes.InvalidLiteral, start, "octal escape sequences are not supported in a character literal; only '\\0' is");
+            }
+        }
+        else if (c is < ' ' or > '~')
+        {
+            throw Error(Codes.InvalidLiteral, start, "only printable ASCII characters and escape sequences are supported in a character literal");
+        }
+        else
+        {
+            value = c;
+        }
+
+        Advance();
+        if (Peek() != '\'')
+        {
+            throw Error(Codes.InvalidLiteral, start,
+                "a character literal holds exactly one character and must end with a quote; multi-character literals and strings are not supported");
+        }
+
+        Advance(); // closing quote
+        return new Token(TokenKind.IntLiteral, _text[begin.._pos], start, value);
     }
 
     private Token LexWord()
@@ -357,8 +435,6 @@ public sealed class Lexer
                 throw Error(Codes.UnsupportedToken, start, "'.' is not supported: version 0 has no structures or floating-point numbers");
             case '"':
                 throw Error(Codes.UnsupportedToken, start, "string literals are not supported in version 0");
-            case '\'':
-                throw Error(Codes.UnsupportedToken, start, "character literals are not supported in version 0");
         }
 
         string shown = char.IsControl(c) || c > '~' ? $"U+{(int)c:X4}" : $"'{c}'";

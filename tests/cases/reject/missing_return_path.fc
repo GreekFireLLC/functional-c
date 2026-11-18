@@ -13,3 +13,4 @@ int main()
 }
 
 //! error: FC3005 8:1 function 'sign' can reach its end without returning a value
+//! flags: --strict

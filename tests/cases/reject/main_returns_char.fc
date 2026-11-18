@@ -1,0 +1,6 @@
+char main()
+{
+    return 0;
+}
+
+//! error: FC3006 1:1 'main' must return 'int'

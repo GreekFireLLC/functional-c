@@ -1,7 +1,0 @@
-int main()
-{
-    let x = (int) true;
-    return 0;
-}
-
-//! error: FC2002 3:13 type casts

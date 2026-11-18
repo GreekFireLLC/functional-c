@@ -3,9 +3,10 @@ using System.Text;
 namespace FunctionalC.Compiler;
 
 /// <summary>
-/// Command line: <c>FunctionalC.Compiler &lt;input.fc&gt; --out &lt;output.fs&gt;</c>.
-/// Exit codes: 0 = translated, 1 = errors in the source, 2 = bad command line, 3 = file I/O failure.
-/// Diagnostics go to standard error. The output file is replaced atomically and only after translation succeeds.
+/// Command line: <c>FunctionalC.Compiler &lt;input.fc&gt; --out &lt;output.fs&gt; [--strict]</c>.
+/// Exit codes: 0 = translated (possibly with warnings), 1 = errors in the source, 2 = bad command line,
+/// 3 = file I/O failure. Diagnostics go to standard error. The output file is replaced atomically and only
+/// after translation succeeds.
 /// </summary>
 public static class Cli
 {
@@ -16,10 +17,16 @@ public static class Cli
 
     private const string Usage =
         """
-        Functional C -> F# translator (version 0)
+        Functional C -> F# translator (version 1.3)
 
         Usage:
-          FunctionalC.Compiler <input.fc> --out <output.fs>
+          FunctionalC.Compiler <input.fc> --out <output.fs> [--strict]
+
+        Options:
+          --strict   Reject what C accepts but a careful programmer avoids: a number stored in a bool,
+                     unreachable code, a function that can reach its end without returning, and a
+                     variable declared without a value. Without it the first is converted as in C,
+                     the next two are warnings, and such a variable starts at 0.
 
         Translates a Functional C source file into an F# source file. Build the F# with the .NET SDK, e.g.
           dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleApp/Program.fs
@@ -39,9 +46,14 @@ public static class Cli
 
         string? input = null;
         string? output = null;
+        bool strict = false;
         for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--out")
+            if (args[i] == "--strict")
+            {
+                strict = true;
+            }
+            else if (args[i] == "--out")
             {
                 if (i + 1 >= args.Length)
                 {
@@ -90,15 +102,16 @@ public static class Cli
             return IoError;
         }
 
-        var result = Translator.Translate(source, input);
+        var result = Translator.Translate(source, input, strict);
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            stderr.WriteLine(diagnostic);
+        }
+
         if (!result.Success)
         {
-            foreach (var diagnostic in result.Diagnostics)
-            {
-                stderr.WriteLine(diagnostic);
-            }
-
-            stderr.WriteLine($"translation failed with {result.Diagnostics.Count} error(s); '{output}' was not written (an existing file is left unchanged)");
+            int errors = result.Diagnostics.Count(d => !d.IsWarning);
+            stderr.WriteLine($"translation failed with {errors} error(s); '{output}' was not written (an existing file is left unchanged)");
             return SourceErrors;
         }
 
@@ -142,7 +155,7 @@ public static class Cli
     private static int UsageFailure(TextWriter stderr, string message)
     {
         stderr.WriteLine($"error: {message}");
-        stderr.WriteLine("usage: FunctionalC.Compiler <input.fc> --out <output.fs>   (use --help for details)");
+        stderr.WriteLine("usage: FunctionalC.Compiler <input.fc> --out <output.fs> [--strict]   (use --help for details)");
         return UsageError;
     }
 }

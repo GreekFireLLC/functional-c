@@ -7,3 +7,4 @@ int main()
 }
 
 //! error: FC3016 6:5 unreachable statement
+//! flags: --strict

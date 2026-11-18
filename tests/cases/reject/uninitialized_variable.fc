@@ -5,3 +5,4 @@ int main()
 }
 
 //! error: FC2002 3:9 variable 'x' must be initialized
+//! flags: --strict

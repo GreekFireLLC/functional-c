@@ -1,0 +1,86 @@
+// Eight-bit arithmetic the way C does it: char and unsigned char, promotion to int,
+// and wrapping when a result is stored back in 8 bits.
+
+// A checksum of 1*1 + 2*2 + ... + n*n. The sum is kept in 8 bits, so it wraps at 256.
+unsigned char checksum(int n)
+{
+    unsigned char sum = 0;
+    for (int i = 1; i <= n; i++) {
+        sum += i * i;                  // int arithmetic, narrowed back to 8 bits
+    }
+    return sum;
+}
+
+// A tiny random number generator: x becomes 5x + 1, kept in 8 bits.
+// It visits all 256 values before it comes back to the seed.
+int period(unsigned char seed)
+{
+    unsigned char x = seed;
+    int steps = 0;
+    do {
+        x = x * 5 + 1;
+        steps++;
+    } while (x != seed);
+    return steps;
+}
+
+bool isUpper(char c)
+{
+    return c >= 'A' && c <= 'Z';
+}
+
+char toLower(char c)
+{
+    return isUpper(c) ? c + ('a' - 'A') : c;
+}
+
+// How many times a signed char that starts at 1 can be incremented before it turns negative.
+int stepsToOverflow()
+{
+    char c = 1;
+    int steps = 0;
+    while (c > 0) {
+        c++;
+        steps++;
+    }
+    return steps;
+}
+
+int main()
+{
+    print(checksum(10));               // 385 wraps to 129
+    print(checksum(100));              // 338350 wraps to 174
+
+    unsigned char x = 1;
+    for (int i = 0; i < 4; i++) {
+        x = x * 5 + 1;
+        print(x);                      // 6, 31, 156, 13
+    }
+    print(period(1));                  // 256
+
+    print(toLower('Q'));               // 113, the code of 'q'
+    print(toLower('q'));               // 113
+    print(toLower('!'));               // 33: not a letter, so unchanged
+    print(stepsToOverflow());          // 127
+
+    bool any = checksum(3);            // 14 is not 0, so true
+    print(any);                        // 1
+    bool none = checksum(0);           // an empty sum is 0, so false
+    print(none);                       // 0
+    return 0;
+}
+
+// Expected output, checked by the test suite:
+//! out: 129
+//! out: 174
+//! out: 6
+//! out: 31
+//! out: 156
+//! out: 13
+//! out: 256
+//! out: 113
+//! out: 113
+//! out: 33
+//! out: 127
+//! out: 1
+//! out: 0

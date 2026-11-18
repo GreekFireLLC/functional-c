@@ -1,0 +1,12 @@
+// --strict treats every number alike: a char is not converted when it is stored in a bool either.
+// An explicit cast is still accepted.
+int main()
+{
+    char c = 'a';
+    bool fine = (bool) c;
+    bool flag = c;
+    return 0;
+}
+
+//! flags: --strict
+//! error: FC3007 7:17 cannot initialize the bool variable 'flag' with a value of type char

@@ -1,4 +1,4 @@
-# Functional C (prototype, version 1.2)
+# Functional C (prototype, version 1.3)
 
 Functional C is a small language with C syntax and functional features: immutable `let` bindings and
 lambdas alongside C's typed variables, `if`/`else` and loops. Its translator turns a `.fc` file into
@@ -16,9 +16,14 @@ Version history:
 - **Version 1.1:** C-style conditions (`if (n)`, `while (1)`, `!n`, `a && b` with ints) and a set of
   example programs.
 - **Version 1.2:** a `bool` can be used wherever an `int` is expected, as 1 or 0 (`int found = a < b;`).
+- **Version 1.3:** C's loose conversions. A number stored in a `bool` is true when it is not 0, `char`
+  and `unsigned char` are 8-bit integers that promote to `int` and wrap when stored, and casts and
+  character literals work as in C. Unreachable code and a missing `return` are warnings instead of
+  errors, `int x;` starts at 0, and `--strict` brings the old errors back.
 
-It is still **not** compatible with arbitrary C programs: there are no pointers, arrays, structures,
-strings, `switch`, headers or preprocessor.
+The goal is a superset of C: every C program stays valid, and the functional features are added on top.
+Version 1.3 is a step in that direction, but the language is still **not** compatible with arbitrary C
+programs: there are no pointers, arrays, structures, strings, `switch`, headers or preprocessor.
 
 ## Requirements
 
@@ -63,7 +68,7 @@ Translator exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Translated |
+| 0 | Translated. Warnings, if there are any, go to stderr. |
 | 1 | The source has errors. Diagnostics go to stderr and **the output file is left untouched**. |
 | 2 | Bad command line |
 | 3 | The input couldn't be read or the output couldn't be written |
@@ -71,6 +76,13 @@ Translator exit codes:
 The translator builds the whole F# file in memory and writes it only after every stage succeeds. It
 writes to a temporary file next to the target and then renames that file over the target, so a failed
 or interrupted translation never leaves a partial or corrupted `Program.fs`.
+
+Add `--strict` to reject what C accepts but a careful programmer avoids (see
+[Warnings and `--strict`](#warnings-and---strict)):
+
+```text
+dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleApp/Program.fs --strict
+```
 
 ## Examples
 
@@ -94,6 +106,7 @@ the output.
 | `fizzbuzz_numbers.fc` | FizzBuzz, printing -3, -5 and -15 in place of the words | Early returns, `else if` chains |
 | `local_lambdas.fc` | Clamped squares, triangle numbers and sums of cubes | `let` lambdas calling each other and the enclosing function, copying a loop counter before capturing it |
 | `ackermann.fc` | Ackermann's function for m ≤ 3 and n ≤ 4 | Deep nested recursion |
+| `eight_bits.fc` | An 8-bit checksum, the period of an 8-bit random number generator (256), and lower-case letters | `char` and `unsigned char`, promotion to `int`, wrapping at 8 bits, a number stored in a `bool` |
 
 To run one, translate it into the sample project:
 
@@ -122,6 +135,10 @@ checks stdout byte for byte, the exit code, and stderr where relevant. Rejection
 code, the diagnostic code, the line and column, the message, and that no output file was written. The
 harness also runs the compiler as a separate process. Options: `--filter <text>`, `--parallel <n>`
 and `--report <file.md>`.
+
+A behavioral test lists every warning it expects from the translator (`//! warning:` lines), and fails
+if the translator gives one more or one fewer. A test with `//! flags: --strict` is translated in strict
+mode.
 
 ## The language
 
@@ -157,16 +174,16 @@ int main()
 
 | Feature | Behavior |
 | --- | --- |
-| Types | `int` (signed 32-bit) and `bool`. Function parameters and return types are written explicitly. |
-| Literals | Decimal integers, `true` and `false` |
+| Types | `int` (signed 32-bit), `bool` (also spelled `_Bool`), `char` (signed 8-bit, also spelled `signed char`) and `unsigned char` (unsigned 8-bit). `signed` and `signed int` mean `int`. Function parameters and return types are written explicitly. |
+| Literals | Decimal integers, `true` and `false`, and character literals such as `'a'`, `'\n'` and `'\0'`. As in C, a character literal is an `int`: `'a'` is 97. |
 | Functions | `type name(type a, type b) { ... }`. A function may call itself and any function defined **above** it. |
 | Immutable bindings | `let name = expression;`. The type is inferred, and the binding can never be assigned. |
-| Mutable variables | `int x = 0;` and `bool done = false, seen = true;`, written C style with an initializer that is **required**. Function parameters are mutable local copies, as in C. |
+| Mutable variables | `int x = 0;` and `bool done = false, seen = true;`, written C style. Without an initializer (`int x;`) the variable starts at 0, or `false` for a `bool`. Function parameters are mutable local copies, as in C. |
 | Assignment | `x = e;`, `x += e;`, `-=`, `*=`, `/=`, `%=`, and `x++;`, `++x;`, `x--;`, `--x;`. These are **statements**, not expressions. |
 | Lambdas | `(int x) => expr`, `(int a, bool b) => expr`, `() => expr`. A lambda can capture enclosing `let` bindings, parameters and variables that are never assigned, call other lambdas in scope, and call the enclosing function. |
 | Calls | `f(a, b)` for functions and let-bound lambdas |
-| Operators | Unary `-` and `!`. Binary `* / %`, `+ -`, `< <= > >=`, `== !=`, `&&`, `\|\|`, and `?:` |
-| Truth values | As in C, an `int` used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. A `bool` used where an `int` is expected counts as 1 or 0 (`int found = a < b;`, `count += x > 0;`, `return a == b;`). An `int` is not converted when it is stored in a `bool`. |
+| Operators | Unary `-` and `!`, and casts `(type) x`. Binary `* / %`, `+ -`, `< <= > >=`, `== !=`, `&&`, `\|\|`, and `?:` |
+| Conversions | As in C, every value type converts to every other without a cast (see [Typing rules](#typing-rules)). A number used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. A `bool` used as a number counts as 1 or 0 (`int found = a < b;`, `count += x > 0;`). A number stored in a `bool` becomes `true` when it is not 0 (`bool done = n;`). A `char` is promoted to `int` in arithmetic, and an `int` stored in a `char` keeps its low 8 bits. |
 | `if` | `if (c) stmt`, `if (c) stmt else stmt`, `else if` chains. Braces are optional, and a dangling `else` binds to the nearest `if`. |
 | Loops | `while (c) stmt`, `do stmt while (c);`, `for (init; cond; update) stmt`. The `for` initializer can be declarations (`int i = 0, j = 10`) or assignments, the update can be several statements separated by commas, and any part can be empty (`for (;;)`). |
 | Jumps | `break;` and `continue;` (innermost loop), and `return expr;` anywhere |
@@ -182,7 +199,7 @@ Precedence follows C, from tightest to loosest:
 | Level | Operators | Associativity |
 | --- | --- | --- |
 | 1 | call `f(...)` | — |
-| 2 | unary `-`, `!` | right |
+| 2 | unary `-`, `!`, cast `(type)` | right |
 | 3 | `*` `/` `%` | left |
 | 4 | `+` `-` | left |
 | 5 | `<` `<=` `>` `>=` | left |
@@ -195,28 +212,36 @@ Assignment and `++`/`--` aren't in this table because they are statements, not o
 
 ### Typing rules
 
-The translator checks these rules itself:
+The translator checks these rules itself. They are C's rules: F# converts nothing implicitly, so the
+translator works out each conversion and writes it into the F#.
 
-- **Int as a truth value.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands of
-  `&&`, `||` and `!`, may be `bool` or `int`. An `int` is true when it is not 0, as in C, so
+- **A number as a truth value.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands
+  of `&&`, `||` and `!`, may be of any type. A number is true when it is not 0, as in C, so
   `while (1)`, `if (n)`, `if (!n)` and `if (n % 2 && ok)` all work. `&&`, `||`, `!` and the comparisons
   produce a `bool`.
-- **Bool as an int.** As in C, a `bool` can be used wherever an `int` is expected, with `true` as 1 and
-  `false` as 0:
-  - initializing, assigning or compound-assigning an `int` variable (`int found = a < b;`,
-    `count += n % 2 == 0;`)
-  - passing it to an `int` parameter, or returning it from an `int` function (`return a == b;`)
-  - `print(flag)`, which prints 1 or 0
-  - an operand of `+ - * / %`, unary `-`, and `< <= > >=`, as in `(a < b) + (c < d)`
-- **`==` and `!=`.** Two `bool`s compare as `bool`s. A `bool` compared with an `int` counts as 0 or 1,
-  so `n == true` means `n == 1` and is false when `n` is 2. That is the same pitfall as in C; write
-  `if (n)` instead.
-- **`?:`.** Both branches have the same type, or one is `int` and the other `bool`, in which case the
-  result is an `int`.
-- **What isn't converted.** An `int` is never converted to `bool` when it is stored, passed or returned:
-  `bool b = 1;`, `b = 0;`, `isSet(1)` for a `bool` parameter, and `return n;` from a `bool` function are
-  rejected. C would accept them. Write `true`, `false` or `n != 0`.
-- `+= -= *= /= %=` and `++`/`--` need an `int` variable.
+- **Integer promotion.** The operands of `+ - * / %`, unary `-` and `< <= > >=` are converted to `int`
+  first: a `char` or `unsigned char` keeps its value, and a `bool` counts as 1 or 0. The arithmetic is
+  done in `int`, so `c + 1000` doesn't wrap even when `c` is a `char`, and `(a < b) + (c < d)` counts
+  how many comparisons hold. `print` promotes its argument the same way: `print(true)` prints 1 and
+  `print('a')` prints 97.
+- **Storing, passing and returning.** A value is converted to the type of the variable, parameter or
+  function it goes to:
+  - to `int`: a `char` keeps its value, and a `bool` becomes 1 or 0 (`int found = a < b;`,
+    `return a == b;`).
+  - to `bool`: any number that is not 0 becomes `true` (`bool done = n;`, `return n % d;`). So
+    `bool b = 256;` is true, although the low 8 bits of 256 are 0.
+  - to `char` or `unsigned char`: the low 8 bits are kept, so `char c = 200;` stores -56,
+    `unsigned char u = 300;` stores 44 and `unsigned char u = -1;` stores 255. C calls the signed case
+    implementation-defined; this is what GCC, Clang and MSVC do.
+- **Casts.** `(type) x` is the same conversion written out: `(char) n`, `(unsigned char) n`, `(bool) n`,
+  `(int) flag`. A cast binds like unary minus, so `(char) n + 200` converts only `n`.
+- **`==` and `!=`.** Two values of the same type compare directly. Otherwise both are promoted to
+  `int`, so `n == true` means `n == 1` and is false when `n` is 2. That is the same pitfall as in C;
+  write `if (n)` instead. A `char` holding -1 and an `unsigned char` holding 255 are different numbers.
+- **`?:`.** Both branches have the same type, or both are promoted and the result is an `int`.
+- **Compound assignment.** `+= -= *= /= %=` and `++`/`--` need an `int`, `char` or `unsigned char`
+  variable. On a `char` they compute in `int` and keep the low 8 bits of the result, so `c++` on a
+  `char` holding 127 gives -128. They are rejected on a `bool` variable.
 - `print` takes one argument and produces no value, so it can only be used as a statement.
 - Call arity must match.
 
@@ -240,12 +265,16 @@ The translator checks these rules itself:
 
 ### Control-flow rules
 
-- Every path through a function must end in `return`. Falling off the end is an error, not C's
-  undefined behavior. A loop like `while (true)`, `while (1)` or `for (;;)` with no `break` never
-  finishes, so the checker doesn't require a `return` after it. Only a literal counts as always true:
-  the checker doesn't evaluate other constant expressions such as `while (2 > 1)`.
-- Code that can never run, such as a statement after `return`, `break` or `continue`, or after an
-  infinite loop, is an **error**.
+- **Reaching the end of a function.** A function that can reach its closing brace without a `return`
+  returns 0 there, or `false` from a `bool` function, and the translator gives warning FC3005. In C the
+  value is undefined when the caller uses it. `main` is the exception C itself makes: reaching its end
+  returns 0, with no warning. A loop like `while (true)`, `while (1)` or `for (;;)` with no `break`
+  never finishes, so nothing is reached after it. Only a literal counts as always true: the checker
+  doesn't evaluate other constant expressions such as `while (2 > 1)`.
+- **Unreachable code.** Code that can never run, such as a statement after `return`, `break` or
+  `continue`, or after an infinite loop, gets warning FC3016 and is left out of the F#. It is still
+  checked, so an unknown name in it is an error.
+- With `--strict` both are errors.
 - `break` and `continue` must be inside a loop and apply to the innermost one. In a `for` loop,
   `continue` still runs the update. In a `do` loop, `continue` jumps to the condition.
 
@@ -263,9 +292,10 @@ The translator checks these rules itself:
 
 ### Integer semantics
 
-These are .NET's `int` semantics, not C's. They were verified by `tests/cases/run/integer_semantics.fc`,
-`mutable_variables.fc` and the three runtime-exception tests. Compound assignments behave like the
-matching operator.
+These are .NET's `int` semantics. Where C leaves a case undefined or up to the compiler, this is the
+choice Functional C makes. They were verified by `tests/cases/run/integer_semantics.fc`,
+`mutable_variables.fc`, `char_types.fc`, `casts.fc` and the three runtime-exception tests. Compound
+assignments behave like the matching operator.
 
 | Case | Result |
 | --- | --- |
@@ -274,26 +304,33 @@ matching operator.
 | `%` | Takes the sign of the dividend: `-7 % 2` is `-1` and `7 % -2` is `1`. |
 | `x / 0`, `x % 0` | Throws `System.DivideByZeroException`. The program dies with an unhandled exception. Observed exit code on Windows: `-1073741676` (`0xC0000094`). |
 | `-2147483648 / -1`, `-2147483648 % -1` | Throws `System.OverflowException`. Observed exit code on Windows: `-1073741675` (`0xC0000095`). |
+| An `int` stored in a `char` or `unsigned char` | Keeps the low 8 bits: 200 becomes -56 in a `char`, and 300 becomes 44 and -1 becomes 255 in an `unsigned char`. |
+| `char` | Signed, -128 to 127. C lets the compiler choose; this is the choice on x86 and x64. |
 | Literals | `0` through `2147483647`. `-2147483648` is allowed only with the minus written directly before the digits, and `-(2147483648)` is rejected. Anything larger, and leading zeros (C octal), hex, suffixes and floating-point literals, are rejected with a diagnostic. |
+| Character literals | One printable ASCII character or one of the escapes `\n \t \r \0 \a \b \f \v \\ \' \" \?`. Multi-character literals, and octal and hex escapes, are rejected. |
 
 ## How the translation works
 
 1. **Lexer** (`Lexer.cs`): turns the source into tokens carrying the file, line and column (a tab
    counts as one column). Multi-character operators are matched before their prefixes. Unsupported
    C tokens (`#`, `[`, `&`, `->`, `.`, `<<`, strings and so on) are rejected with a specific message.
+   A character literal becomes an integer token, as it is an `int` in C.
 2. **Parser** (`Parser.cs`): recursive descent, with one method per precedence level, building the AST
-   (`Ast.cs`). Lambdas and parentheses are told apart on purpose: `(int`, `(bool` or `() =>` starts a
-   lambda. Assignment and `++`/`--` are recognized only as statements; inside an expression they get a
+   (`Ast.cs`). Casts, lambdas and parentheses are told apart on purpose: `(type)` alone is a cast,
+   `(type name` or `() =>` starts a lambda. Assignment and `++`/`--` are recognized only as statements; inside an expression they get a
    targeted error ("did you mean '=='?"). The parser stops at the first syntax error.
 3. **Checker** (`Checker.cs`, `Flow.cs`): name resolution, block scopes, mutability and capture rules,
-   declaration-before-use, `break`/`continue` placement, unreachable code, the "every path returns"
-   rule, the `main` rules, arity and types. It reports every error it finds, sorted by position.
+   declaration-before-use, `break`/`continue` placement, unreachable code, functions that reach their
+   end, the `main` rules, arity and types. It records each implicit conversion on the expression it
+   applies to, removes unreachable statements, and gives a function that can reach its end a final
+   `return 0;`. It reports every error and warning it finds, sorted by position.
 4. **Emitter** (`FSharpEmitter.cs`): produces deterministic F# with 4-space indentation and `\n` line
    endings, and parenthesizes every compound expression.
 
 | Functional C | F# |
 | --- | --- |
 | `int f(int a, bool b) { ... }` | `let f (a: int) (b: bool) : int =` (curried, used the same way for functions, lambdas and calls) |
+| `char`, `unsigned char` | `sbyte`, `byte`. C's `char` is an 8-bit integer, so it doesn't map to F#'s 16-bit `char`. |
 | a function that calls itself (also from inside a lambda) | `let rec f ...` |
 | `let x = e;` | `let x = e` |
 | `int x = e;` | `let mutable x = e` if `x` is ever assigned, otherwise `let x = e` |
@@ -308,6 +345,14 @@ matching operator.
 | `==`, `!=`, `!x` | `=`, `<>`, `(fc'not x)` |
 | an `int` used as a truth value: `if (n)`, `!n`, `n && m` | `if (n <> 0) then`, `(n = 0)`, `((n <> 0) && (m <> 0))`. A literal becomes `true` or `false`, so `while (1)` becomes `while true do`. |
 | a `bool` used as an `int`: `int found = a < b;`, `print(true);` | `let found = (if (a < b) then 1 else 0)`, `fc'print 1` |
+| a number stored in a `bool`: `bool done = n;`, `bool one = 1;` | `let done = (n <> 0)`, `let one = true` |
+| a `char` promoted to `int`: `c + 1`, `print(c);` | `((fc'int c) + 1)`, `fc'print (fc'int c)` |
+| an `int` stored in a `char`: `char c = n;`, `char big = 200;` | `let c = (fc'char n)`, `let big = (-56y)`. A literal is converted by the translator. |
+| a `char` as a truth value: `while (c)`, `!c` | `while (c <> 0y) do`, `(c = 0y)` (`0uy` for an `unsigned char`) |
+| `c++;`, `u += n;` on a `char` and an `unsigned char` | `c <- (fc'char ((fc'int c) + 1))`, `u <- (fc'uchar ((fc'int u) + n))` |
+| a cast: `(char) n`, `(bool) n` | the same conversions: `(fc'char n)`, `(n <> 0)` |
+| `int x;` | `let x = 0` (`let mutable x = 0` if it is assigned later) |
+| a function that can reach its end | a final `0`, `false`, `0y` or `0uy`, as if the source ended with `return 0;` |
 | `f(x);` (call statement) | `fc'ignore (f x)` |
 | `print(e);` | `fc'print e` |
 | `int main()` | an ordinary `let main () : int =` plus a separate `[<EntryPoint>] let fc'entry (_args: string array) : int = main ()` |
@@ -359,14 +404,15 @@ of two modes:
 - Names that start with an uppercase letter or `_` get a `u'` prefix: `None` becomes `u'None` and
   `__LINE__` becomes `u'__LINE__`. Without it, F# would read them as union cases or active patterns
   (`None`, `Some`, `Ok`, `Failure`, ...) or special identifiers.
-- Translator-internal names (`fc'print`, `fc'ignore`, `fc'not`, `fc'entry`, `fc'result`, `fc'brk1`,
-  temporaries `fc't1`, ...) use an apostrophe. Functional C identifiers can't contain an apostrophe,
+- Translator-internal names (`fc'print`, `fc'ignore`, `fc'not`, `fc'int`, `fc'char`, `fc'uchar`,
+  `fc'entry`, `fc'result`, `fc'brk1`, temporaries `fc't1`, ...) use an apostrophe. Functional C identifiers can't contain an apostrophe,
   so internal names can never collide with source names.
 - `print` is reserved for the built-in.
 
-Every generated file starts with a small runtime prelude (`fc'print`, `fc'ignore`, `fc'not`). The
-prelude is defined before any user code, so user names (even a user function named `not`) can't
-shadow what the generated code relies on.
+Every generated file starts with a small runtime prelude: `fc'print`, `fc'ignore`, `fc'not`, and the
+conversions `fc'int`, `fc'char` and `fc'uchar`, which wrap F#'s `int`, `sbyte` and `byte` functions. The
+prelude is defined before any user code, so user names (even a user function named `not` or a variable
+named `byte`) can't shadow what the generated code relies on.
 
 ## Diagnostics
 
@@ -378,16 +424,16 @@ tests/cases/reject/immutable_reassign.fc(4,5): error FC3002: cannot assign to 'x
 
 | Code | Meaning |
 | --- | --- |
-| FC1001–FC1005 | Lexical: unexpected character, unterminated comment, integer out of range, invalid literal, unsupported C token |
+| FC1001–FC1005 | Lexical: unexpected character, unterminated comment, integer out of range, invalid literal (including a malformed character literal), unsupported C token |
 | FC2001 | Syntax error, for example a missing `;`, `)` or `}`, or an `else` without an `if`. The message includes the line and column. |
-| FC2002 | Unsupported C feature: pointers, `switch`, `goto`, `void`, casts, uninitialized variables, assignment or `++` inside an expression, ... |
+| FC2002 | Unsupported C feature: pointers, `switch`, `goto`, `void`, `unsigned int`, assignment or `++` inside an expression, ... With `--strict`, also a variable declared without an initializer. |
 | FC3001 | Unknown name (including assignment to an undeclared name) |
 | FC3002 | Assignment to something immutable: a `let` binding, lambda parameter, lambda or function |
 | FC3003 | Duplicate name or shadowing |
 | FC3004 | Forward reference or mutual recursion |
-| FC3005 | A function can reach its end without returning a value |
+| FC3005 | A function can reach its end without returning a value. A **warning**; an error with `--strict`. |
 | FC3006 | Entry point: `main` missing, duplicated, not `int`, or has parameters |
-| FC3007 | Type mismatch: an `int` stored in, passed as or returned as a `bool`, or `+=` or `++` on a `bool` variable |
+| FC3007 | Type mismatch: `+=` or `++` on a `bool` variable. With `--strict`, also a number stored in, passed as or returned as a `bool`. |
 | FC3008 | Wrong number of arguments |
 | FC3009 / FC3010 | A function used as a value / a value called as a function |
 | FC3011 | An expression statement that isn't a call, assignment or increment |
@@ -395,9 +441,28 @@ tests/cases/reject/immutable_reassign.fc(4,5): error FC3002: cannot assign to 'x
 | FC3013 | `print(...)` used as a value |
 | FC3014 | A lambda that isn't a `let` initializer |
 | FC3015 | A binding or variable used in its own initializer |
-| FC3016 | Unreachable statement |
+| FC3016 | Unreachable statement. A **warning**; an error with `--strict`. |
 | FC3017 | A lambda capturing a variable that is assigned |
 | FC3018 | `break` or `continue` outside a loop |
+
+### Warnings and `--strict`
+
+C accepts some things that a careful programmer avoids. By default the translator follows C. A warning
+has the same format as an error, with the word `warning`, and doesn't stop the translation:
+
+```text
+tests/cases/run/falls_off_end.fc(13,1): warning FC3005: function 'sign' can reach its end without returning a value; it returns 0 there (C leaves the value undefined)
+```
+
+| In the source | Default | With `--strict` |
+| --- | --- | --- |
+| A number stored in, passed as or returned as a `bool` (`bool done = 1;`) | Converted, as in C: true when it is not 0 | Error FC3007 |
+| A statement that can never run | Warning FC3016; the statement is left out | Error FC3016 |
+| A function that can reach its end without a `return` | Warning FC3005 (none for `main`); it returns 0 or `false` | Error FC3005, for `main` too |
+| A variable declared without a value (`int x;`) | Starts at 0 or `false` | Error FC2002 |
+
+`--strict` gives the rules that versions up to 1.2 always applied. Casts and the `char` types work in
+both modes, and so do a `bool` used as a number and a number used as a condition.
 
 **Where checking happens.** The translator checks every rule above before writing anything. The F#
 compiler then checks the generated code again when you run `dotnet build`. This is a check for the
@@ -407,15 +472,16 @@ the `.fc` source. That would mean a translator bug, so please keep the `.fc` inp
 
 ## Limitations and known issues
 
-- No pointers, arrays, structures, strings, chars, floating point, unsigned types, bitwise or shift
-  operators, headers, preprocessor, `switch`, `goto`, global variables or function prototypes.
+- No pointers, arrays, structures, strings, floating point, bitwise or shift operators, headers,
+  preprocessor, `switch`, `goto`, `void`, global variables or function prototypes.
+- The integer types are `int`, `char` and `unsigned char`. There is no `short`, `long` or
+  `unsigned int` yet.
 - Assignment and `++`/`--` are statements only, and there is no comma operator, so
   `while ((c = next()) != 0)` and `a[i++]`-style code isn't supported. The comma is allowed only between
   declarators and in a `for` header.
-- Variables must be initialized when declared.
-- An `int` is not converted to `bool` when it is stored, passed or returned (see
-  [Typing rules](#typing-rules)). So `bool b = 1;` and `return n;` from a `bool` function are
-  rejected, even though C accepts them. The other direction, `bool` to `int`, works as in C.
+- `+=`, `++` and the other compound assignments are rejected on a `bool` variable, though C accepts
+  them.
+- `let` is a keyword, so a C program that uses `let` as a name is rejected.
 - No forward references or mutual recursion; a function can only call functions defined above it.
 - No shadowing, recursive lambdas, or first-class functions (you can't pass or return a function). A
   lambda can't capture a variable that is assigned.
@@ -453,6 +519,10 @@ C#, emits readable F# that the .NET SDK compiles.
 - Version 1 added C-style mutable variables, `if` and loops, keeping `let` immutable.
 - Version 1.1 added C-style int conditions and the example programs.
 - Version 1.2 let a `bool` be used as an `int`.
+- Version 1.3 set the direction as a superset of C and took on C's loose conversions: a number as a
+  `bool`, the 8-bit `char` types, casts and character literals. What had been errors on purpose
+  (unreachable code, a missing `return`, an uninitialized variable) became C's behavior with
+  warnings, and `--strict` keeps the old rules available.
 
 The SDK, target framework and results recorded in `TEST-RESULTS.md` come from actual runs.
 

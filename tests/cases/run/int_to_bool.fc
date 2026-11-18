@@ -1,0 +1,65 @@
+// As in C, a number stored in a bool is true when it is not 0. That covers initialization,
+// assignment, arguments and return values. (With --strict each of these is an error.)
+
+bool isSet(bool flag)
+{
+    return flag;
+}
+
+// Returning an int from a bool function: any nonzero value is true.
+bool hasRemainder(int n, int d)
+{
+    return n % d;
+}
+
+int main()
+{
+    bool one = 1;
+    bool zero = 0;
+    bool big = 256;                    // true: a bool keeps "not zero"; a char would keep the low 8 bits (0)
+    bool negative = -5;
+    print(one);                        // 1
+    print(zero);                       // 0
+    print(big);                        // 1
+    print(negative);                   // 1
+
+    int n = 42;
+    bool flag = n;
+    print(flag);                       // 1
+    flag = n - 42;
+    print(flag);                       // 0
+    flag = n * 2;
+    print(flag);                       // 1
+
+    print(isSet(7));                   // 1
+    print(isSet(n - n));               // 0
+    print(hasRemainder(10, 3));        // 1
+    print(hasRemainder(10, 5));        // 0
+
+    // A bool holds only true or false, so two bools made from different numbers are equal.
+    bool a = 2;
+    bool b = 3;
+    print(a == b);                     // 1
+    print(a + b);                      // 2
+    return 0;
+}
+
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 1
+//! out: 2
+//! fs-contains: let one = true
+//! fs-contains: let zero = false
+//! fs-contains: let mutable flag = (n <> 0)
+//! fs-contains: flag <- ((n - 42) <> 0)
+//! fs-contains: ((n % d) <> 0)
+//! fs-contains: (isSet true)

@@ -108,9 +108,9 @@ public sealed class Parser
             "struct" or "union" or "enum" or "typedef" =>
                 $"'{w}' declarations are not supported in version 0",
             "void" =>
-                "'void' is not supported in version 0: functions take typed parameters and return 'int' or 'bool'",
-            "char" or "short" or "long" or "float" or "double" or "unsigned" or "signed" or "_Bool" =>
-                $"type '{w}' is not supported in version 0: only 'int' and 'bool' are available",
+                "'void' is not supported yet: every function returns a value ('int', 'bool', 'char' or 'unsigned char')",
+            "short" or "long" or "float" or "double" =>
+                $"type '{w}' is not supported yet: the available types are 'int', 'bool', 'char' and 'unsigned char'",
             "sizeof" =>
                 "'sizeof' is not supported in version 0",
             _ =>
@@ -135,6 +135,21 @@ public sealed class Parser
         return new ProgramNode(_file, functions);
     }
 
+    private static bool IsTypeStart(TokenKind kind) =>
+        kind is TokenKind.KwInt or TokenKind.KwBool or TokenKind.KwChar or TokenKind.KwSigned or TokenKind.KwUnsigned;
+
+    /// <summary>The number of tokens in the type that starts <paramref name="offset"/> tokens ahead, or 0 if none does.</summary>
+    private int TypeLength(int offset)
+    {
+        var kind = PeekToken(offset).Kind;
+        if (kind is TokenKind.KwSigned or TokenKind.KwUnsigned)
+        {
+            return PeekToken(offset + 1).Kind is TokenKind.KwInt or TokenKind.KwChar ? 2 : 1;
+        }
+
+        return IsTypeStart(kind) ? 1 : 0;
+    }
+
     private FcType ParseType(string context)
     {
         var token = Current;
@@ -146,11 +161,32 @@ public sealed class Parser
             case TokenKind.KwBool:
                 Advance();
                 return FcType.Bool;
+            case TokenKind.KwChar:
+                Advance();
+                return FcType.Char; // plain char is signed, as on the common x86 and x64 compilers
+            case TokenKind.KwSigned:
+                Advance();
+                if (Match(TokenKind.KwChar))
+                {
+                    return FcType.Char;
+                }
+
+                Match(TokenKind.KwInt); // 'signed' and 'signed int' both mean int
+                return FcType.Int;
+            case TokenKind.KwUnsigned:
+                Advance();
+                if (Match(TokenKind.KwChar))
+                {
+                    return FcType.UChar;
+                }
+
+                throw Error(Codes.UnsupportedFeature, token.Location,
+                    "'unsigned int' is not supported yet: the only unsigned type is 'unsigned char'");
             case TokenKind.ReservedWord:
                 throw Unsupported(token);
             default:
                 throw Error(Codes.Syntax, token.Location,
-                    $"expected a type ('int' or 'bool') for {context} but found {token.Describe()}");
+                    $"expected a type ('int', 'bool', 'char' or 'unsigned char') for {context} but found {token.Describe()}");
         }
     }
 
@@ -305,9 +341,10 @@ public sealed class Parser
                 return let;
             }
 
-            case TokenKind.KwInt or TokenKind.KwBool:
+            case TokenKind.KwInt or TokenKind.KwBool or TokenKind.KwChar or TokenKind.KwSigned or TokenKind.KwUnsigned:
             {
-                if (PeekToken(1).Kind == TokenKind.Identifier && PeekToken(2).Kind == TokenKind.LParen)
+                int typeLength = TypeLength(0);
+                if (PeekToken(typeLength).Kind == TokenKind.Identifier && PeekToken(typeLength + 1).Kind == TokenKind.LParen)
                 {
                     throw Error(Codes.Syntax, token.Location,
                         $"missing '}}' to close the body of '{functionName}' (opened at {functionOpen.Location.Short}) before this function definition; nested functions are not supported");
@@ -363,7 +400,7 @@ public sealed class Parser
         Expect(TokenKind.LParen, "'(' after 'for'");
 
         var init = new List<Stmt>();
-        if (Check(TokenKind.KwInt) || Check(TokenKind.KwBool))
+        if (IsTypeStart(Current.Kind))
         {
             init.Add(ParseDeclaration());
         }
@@ -414,7 +451,10 @@ public sealed class Parser
         return new LetStmt(name.Text, name.Location, initializer, letToken.Location);
     }
 
-    /// <summary>"int a = 1, b = 2" (without the ';'). Every variable must be initialized.</summary>
+    /// <summary>
+    /// "int a = 1, b = 2" (without the ';'). A variable without an initializer ("int a;") is indeterminate in C;
+    /// here it starts at 0 (or false), and '--strict' rejects it.
+    /// </summary>
     private DeclarationStmt ParseDeclaration()
     {
         var typeToken = Current;
@@ -428,15 +468,15 @@ public sealed class Parser
         do
         {
             var name = Expect(TokenKind.Identifier, "a variable name");
-            if (!Check(TokenKind.Assign))
+            if (Match(TokenKind.Assign))
             {
-                throw Error(Codes.UnsupportedFeature, name.Location,
-                    $"variable '{name.Text}' must be initialized, as in '{typeToken.Text} {name.Text} = ...;' (uninitialized variables are not supported)");
+                declarators.Add(new VarDeclarator(name.Text, name.Location, ParseExpression(), hasInitializer: true));
             }
-
-            Advance();
-            var initializer = ParseExpression();
-            declarators.Add(new VarDeclarator(name.Text, name.Location, initializer));
+            else
+            {
+                Expr zero = type == FcType.Bool ? new BoolLiteralExpr(false, name.Location) : new IntLiteralExpr(0, name.Location);
+                declarators.Add(new VarDeclarator(name.Text, name.Location, zero, hasInitializer: false));
+            }
         }
         while (Match(TokenKind.Comma));
 
@@ -664,16 +704,19 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// Disambiguates '(' deliberately: a lambda starts with "(int", "(bool" or "() =>"; anything else is a
-    /// parenthesized expression. "(x) => ..." is rejected with a hint that lambda parameters need types.
+    /// Disambiguates '(' deliberately. "(type)" on its own is a cast, as in "(char) n". A lambda starts with
+    /// "(type name" or "() =>". Anything else is a parenthesized expression. "(x) => ..." is rejected with a
+    /// hint that lambda parameters need types.
     /// </summary>
     private Expr ParseParenthesizedOrLambda()
     {
         var open = Current;
         var next = PeekToken(1);
-        if (next.Kind is TokenKind.KwInt or TokenKind.KwBool)
+        if (IsTypeStart(next.Kind))
         {
-            return ParseLambda();
+            int typeLength = TypeLength(1);
+            bool isCast = PeekToken(1 + typeLength).Kind == TokenKind.RParen && PeekToken(2 + typeLength).Kind != TokenKind.Arrow;
+            return isCast ? ParseCast() : ParseLambda();
         }
 
         if (next.Kind == TokenKind.RParen)
@@ -707,6 +750,15 @@ public sealed class Parser
         return inner;
     }
 
+    /// <summary>"(type) operand". A cast binds as tightly as unary minus, so "(char) a + b" converts only a.</summary>
+    private Expr ParseCast()
+    {
+        var open = Advance(); // '('
+        var type = ParseType("a cast");
+        Expect(TokenKind.RParen, "')' to close the cast");
+        return new CastExpr(type, ParseUnary(), open.Location);
+    }
+
     private Expr ParseLambda()
     {
         var open = Advance(); // '('
@@ -715,14 +767,7 @@ public sealed class Parser
         {
             do
             {
-                var typeToken = Current;
                 var type = ParseType("a lambda parameter");
-                if (Check(TokenKind.RParen) && PeekToken(1).Kind != TokenKind.Arrow && parameters.Count == 0)
-                {
-                    throw Error(Codes.UnsupportedFeature, open.Location,
-                        $"type casts such as '({typeToken.Text}) x' are not supported in version 0");
-                }
-
                 if (Check(TokenKind.Star))
                 {
                     throw PointerError(Current);

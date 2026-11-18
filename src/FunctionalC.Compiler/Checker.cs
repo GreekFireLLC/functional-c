@@ -2,14 +2,22 @@ namespace FunctionalC.Compiler;
 
 /// <summary>
 /// Semantic validation: name resolution, block scoping (no shadowing), mutability rules, declaration-before-use,
-/// control flow (break/continue placement, unreachable code, every path returns), the entry point, arity,
-/// and int/bool types. Collects every error it finds instead of stopping at the first one.
+/// control flow (break/continue placement, unreachable code, falling off the end), the entry point, arity,
+/// and types. It also records C's implicit conversions on the expressions, for the emitter to write out.
+/// Collects every error and warning it finds instead of stopping at the first one.
+///
+/// By default the checker follows C where C is loose: an int stored in a bool is converted, code that can
+/// never run is dropped with a warning, a function that reaches its end returns 0 with a warning, and
+/// "int x;" starts at 0. With <paramref name="strict"/> each of those is an error, as before version 1.3.
 /// </summary>
-public sealed class Checker
+public sealed class Checker(bool strict = false)
 {
     private const string PrintName = "print";
 
     private readonly List<Diagnostic> _errors = [];
+
+    /// <summary>True while checking statements that can never run; they are checked but leave no trace on live code.</summary>
+    private bool _dead;
     private readonly Dictionary<string, FunctionSymbol> _functions = new(StringComparer.Ordinal);
     private Dictionary<string, FunctionDecl> _allDeclarations = new(StringComparer.Ordinal);
     private string _file = "";
@@ -47,6 +55,10 @@ public sealed class Checker
     }
 
     private void Error(string code, SourceLocation at, string message) => _errors.Add(new Diagnostic(code, message, at));
+
+    /// <summary>Something C accepts but a careful programmer would not write: a warning, or an error with --strict.</summary>
+    private void Warn(string code, SourceLocation at, string strictMessage, string looseMessage) =>
+        _errors.Add(new Diagnostic(code, strict ? strictMessage : looseMessage, at, IsWarning: !strict));
 
     // ------------------------------------------------------------ scopes
 
@@ -170,12 +182,27 @@ public sealed class Checker
         }
 
         // The body shares the parameters' scope, as in C: a local cannot redeclare a parameter.
-        bool fallsOffEnd = CheckStatements(function.Body, scope);
+        bool fallsOffEnd = CheckStatements(function.Body, scope, out var body);
         if (fallsOffEnd)
         {
-            Error(Codes.ReturnPlacement, function.CloseBraceLocation,
-                $"function '{function.Name}' can reach its end without returning a value; every path must end with 'return <expression>;'");
+            // C: reaching the end of main returns 0; elsewhere the value is undefined if the caller uses it.
+            // Here it is 0 (or false) everywhere, written as a final return so the emitter needs no special case.
+            bool isBool = function.ReturnType == FcType.Bool;
+            if (strict || function.Name != "main")
+            {
+                Warn(Codes.ReturnPlacement, function.CloseBraceLocation,
+                    $"function '{function.Name}' can reach its end without returning a value; every path must end with 'return <expression>;'",
+                    $"function '{function.Name}' can reach its end without returning a value; it returns {(isBool ? "false" : "0")} there (C leaves the value undefined)");
+            }
+
+            Expr value = isBool
+                ? new BoolLiteralExpr(false, function.CloseBraceLocation) { Type = FcType.Bool }
+                : new IntLiteralExpr(0, function.CloseBraceLocation) { Type = FcType.Int };
+            Accepts(function.ReturnType, value, value.Type);
+            body = [.. body, new ReturnStmt(value, function.CloseBraceLocation) { CanCompleteNormally = false }];
         }
+
+        function.Body = body;
 
         foreach (var (captured, at) in _captures)
         {
@@ -219,27 +246,45 @@ public sealed class Checker
 
     // ------------------------------------------------------------ statements
 
-    /// <summary>Checks a statement sequence in the given scope. Returns true if control can flow past its end.</summary>
-    private bool CheckStatements(IReadOnlyList<Stmt> statements, Scope scope)
+    /// <summary>
+    /// Checks a statement sequence in the given scope. Returns true if control can flow past its end.
+    /// <paramref name="live"/> is the sequence without the statements that can never run: those are still
+    /// checked (as a C compiler checks them) but are not translated.
+    /// </summary>
+    private bool CheckStatements(IReadOnlyList<Stmt> statements, Scope scope, out IReadOnlyList<Stmt> live)
     {
         bool reachable = true;
         bool reported = false;
-        foreach (var statement in statements)
+        bool enclosingDead = _dead;
+        int liveCount = statements.Count;
+        for (int i = 0; i < statements.Count; i++)
         {
-            if (!reachable && !reported && statement is not EmptyStmt)
+            var statement = statements[i];
+            if (!reachable && !reported && !enclosingDead && statement is not EmptyStmt)
             {
-                Error(Codes.Unreachable, statement.Location,
-                    "unreachable statement: the statement before it never finishes normally (it returns, breaks, continues, or loops forever)");
+                const string why = "unreachable statement: the statement before it never finishes normally (it returns, breaks, continues, or loops forever)";
+                Warn(Codes.Unreachable, statement.Location, why, why + "; it is left out of the translation");
                 reported = true;
             }
 
-            if (!CheckStatement(statement, scope))
+            if (!CheckStatement(statement, scope) && reachable)
             {
                 reachable = false;
+                liveCount = i + 1;
+                _dead = true;
             }
         }
 
+        _dead = enclosingDead;
+        live = liveCount == statements.Count ? statements : statements.Take(liveCount).ToList();
         return reachable;
+    }
+
+    private bool CheckBlock(BlockStmt block, Scope scope)
+    {
+        bool completes = CheckStatements(block.Statements, new Scope(scope), out var live);
+        block.Statements = live;
+        return completes;
     }
 
     /// <summary>Checks one statement. Returns (and records) whether control can flow past it.</summary>
@@ -248,7 +293,7 @@ public sealed class Checker
         bool completes = statement switch
         {
             EmptyStmt => true,
-            BlockStmt block => CheckStatements(block.Statements, new Scope(scope)),
+            BlockStmt block => CheckBlock(block, scope),
             LetStmt let => CheckLet(let, scope),
             DeclarationStmt declaration => CheckDeclaration(declaration, scope),
             AssignStmt assign => CheckAssignment(assign, scope),
@@ -267,25 +312,38 @@ public sealed class Checker
     }
 
     /// <summary>
-    /// True if a value of type <paramref name="actual"/> may be used where <paramref name="expected"/> is required.
-    /// As in C, a bool is accepted where an int is expected (true is 1, false is 0); the expression is then marked
-    /// so the emitter converts it. An int is not accepted where a bool is stored, passed or returned. A null type
-    /// (an error already reported) is accepted, to avoid cascading errors.
+    /// True if a value of type <paramref name="actual"/> may be stored, passed or returned where
+    /// <paramref name="expected"/> is required. As in C, every value type converts to every other: a bool counts
+    /// as 1 or 0, a nonzero number stored in a bool is true, and a number stored in a narrower type wraps. The
+    /// expression is marked so the emitter writes the conversion. With --strict a number is not accepted where
+    /// a bool is required. A null type (an error already reported) is accepted, to avoid cascading errors.
     /// </summary>
-    private static bool Accepts(FcType expected, Expr expression, FcType? actual)
+    private bool Accepts(FcType expected, Expr expression, FcType? actual)
     {
         if (actual is null || actual == expected)
         {
             return true;
         }
 
-        if (expected == FcType.Int && actual == FcType.Bool)
+        if (strict && expected == FcType.Bool)
         {
-            expression.ConvertToInt = true;
-            return true;
+            return false;
         }
 
-        return false;
+        expression.ConvertTo = expected;
+        return true;
+    }
+
+    /// <summary>
+    /// C's integer promotion: an operand of an arithmetic or relational operator that is narrower than int
+    /// (a char, or a bool counting as 1 or 0) is converted to int before the operator is applied.
+    /// </summary>
+    private static void Promote(Expr operand, FcType? actual)
+    {
+        if (actual is { } type && type != FcType.Int)
+        {
+            operand.ConvertTo = FcType.Int;
+        }
     }
 
     private bool CheckReturn(ReturnStmt ret, Scope scope)
@@ -368,6 +426,11 @@ public sealed class Checker
             return true; // already an error; do not also report the following statements as unreachable
         }
 
+        if (_dead)
+        {
+            return false; // a jump that can never run does not make its loop need a flag
+        }
+
         if (jump is BreakStmt)
         {
             _loops.Peek().UsesBreak = true;
@@ -411,6 +474,12 @@ public sealed class Checker
         foreach (var declarator in declaration.Declarators)
         {
             bool nameOk = CheckNewName(declarator.Name, declarator.NameLocation, scope, "variable");
+            if (strict && !declarator.HasInitializer)
+            {
+                Error(Codes.UnsupportedFeature, declarator.NameLocation,
+                    $"variable '{declarator.Name}' must be initialized, as in '{declaration.Type.Name()} {declarator.Name} = ...;' (--strict rejects uninitialized variables)");
+            }
+
             _pendingName = declarator.Name;
             var type = CheckExpression(declarator.Initializer, scope);
             _pendingName = null;
@@ -452,12 +521,13 @@ public sealed class Checker
                 {
                     if (variable.Type is FcType.Bool)
                     {
-                        Error(Codes.TypeMismatch, assign.Location, $"'{op}' needs an int variable, but '{assign.Name}' is bool");
+                        Error(Codes.TypeMismatch, assign.Location, $"'{op}' needs an int or char variable, but '{assign.Name}' is bool");
                     }
 
-                    if (assign.Value is { } value && !Accepts(FcType.Int, value, valueType)) // a bool value counts as 0 or 1
+                    // 'c += e' on a char computes in int and narrows the result, as in C.
+                    if (assign.Value is { } value)
                     {
-                        Error(Codes.TypeMismatch, value.Location, $"'{op}' needs an int value but this expression has type {valueType.Name()}");
+                        Promote(value, valueType);
                     }
                 }
 
@@ -519,10 +589,7 @@ public sealed class Checker
             return;
         }
 
-        if (!Accepts(FcType.Int, print.Arguments[0], types[0])) // print(true) prints 1, as printf("%d", ...) would
-        {
-            Error(Codes.TypeMismatch, print.Arguments[0].Location, $"'print' expects an int argument but this expression has type {types[0].Name()}");
-        }
+        Promote(print.Arguments[0], types[0]); // print(true) prints 1 and print('a') prints 97, as printf("%d", ...) would
     }
 
     // ------------------------------------------------------------ expressions
@@ -576,7 +643,7 @@ public sealed class Checker
                 switch (symbol)
                 {
                     case ValueSymbol value:
-                        if (_inLambda && value.Kind != "lambda parameter")
+                        if (_inLambda && !_dead && value.Kind != "lambda parameter")
                         {
                             _captures.Add((value, name.Location));
                         }
@@ -597,15 +664,19 @@ public sealed class Checker
                 return FcType.Bool;
 
             case UnaryExpr unary:
+                Promote(unary.Operand, CheckExpression(unary.Operand, scope));
+                return FcType.Int;
+
+            case CastExpr cast:
             {
-                var operand = CheckExpression(unary.Operand, scope);
-                if (!Accepts(FcType.Int, unary.Operand, operand))
+                // An explicit conversion is the same conversion C applies implicitly, so it is recorded the same way.
+                var operand = CheckExpression(cast.Operand, scope);
+                if (operand is { } from && from != cast.Target)
                 {
-                    Error(Codes.TypeMismatch, unary.Location,
-                        $"operator '{unary.Op.Source()}' expects an int operand but got {operand.Name()}");
+                    cast.Operand.ConvertTo = cast.Target;
                 }
 
-                return FcType.Int;
+                return cast.Target;
             }
 
             case BinaryExpr binary:
@@ -618,15 +689,10 @@ public sealed class Checker
                 var whenFalse = CheckExpression(conditional.WhenFalse, scope);
                 if (whenTrue is not null && whenFalse is not null && whenTrue != whenFalse)
                 {
-                    // As in C, an int branch and a bool branch give an int; the bool branch counts as 0 or 1.
-                    if (Accepts(FcType.Int, conditional.WhenTrue, whenTrue) && Accepts(FcType.Int, conditional.WhenFalse, whenFalse))
-                    {
-                        return FcType.Int;
-                    }
-
-                    Error(Codes.TypeMismatch, conditional.QuestionLocation,
-                        $"both branches of '?:' must have the same type, but they are {whenTrue.Name()} and {whenFalse.Name()}");
-                    return null;
+                    // As in C, branches of different types are both promoted and give an int.
+                    Promote(conditional.WhenTrue, whenTrue);
+                    Promote(conditional.WhenFalse, whenFalse);
+                    return FcType.Int;
                 }
 
                 return whenTrue ?? whenFalse;
@@ -658,37 +724,27 @@ public sealed class Checker
     {
         var left = CheckExpression(binary.Left, scope);
         var right = CheckExpression(binary.Right, scope);
-        string op = binary.Op.Source();
-
-        // Arithmetic and relational operands are ints; as in C, a bool operand counts as 0 or 1.
-        void Require(FcType expected, Expr operand, FcType? actual, string side)
-        {
-            if (!Accepts(expected, operand, actual))
-            {
-                Error(Codes.TypeMismatch, binary.OperatorLocation,
-                    $"operator '{op}' expects {expected.Name()} operands but the {side} operand has type {actual.Name()}");
-            }
-        }
 
         switch (binary.Op)
         {
+            // Arithmetic is done in int: as in C, a char or bool operand is promoted first.
             case BinaryOp.Add or BinaryOp.Subtract or BinaryOp.Multiply or BinaryOp.Divide or BinaryOp.Remainder:
-                Require(FcType.Int, binary.Left, left, "left");
-                Require(FcType.Int, binary.Right, right, "right");
+                Promote(binary.Left, left);
+                Promote(binary.Right, right);
                 return FcType.Int;
 
             case BinaryOp.Less or BinaryOp.LessEqual or BinaryOp.Greater or BinaryOp.GreaterEqual:
-                Require(FcType.Int, binary.Left, left, "left");
-                Require(FcType.Int, binary.Right, right, "right");
+                Promote(binary.Left, left);
+                Promote(binary.Right, right);
                 return FcType.Bool;
 
             case BinaryOp.Equal or BinaryOp.NotEqual:
-                // Two bools compare as bools. Mixed with an int, the bool counts as 0 or 1 as in C,
+                // Two values of the same type compare directly. Otherwise both are promoted to int as in C,
                 // so 'n == true' means 'n == 1' (false for n = 2).
                 if (left is not null && right is not null && left != right)
                 {
-                    Require(FcType.Int, binary.Left, left, "left");
-                    Require(FcType.Int, binary.Right, right, "right");
+                    Promote(binary.Left, left);
+                    Promote(binary.Right, right);
                 }
 
                 return FcType.Bool;
@@ -721,7 +777,7 @@ public sealed class Checker
         }
 
         var callable = (ICallable)symbol;
-        if (ReferenceEquals(symbol, _current))
+        if (ReferenceEquals(symbol, _current) && !_dead)
         {
             _current!.IsRecursive = true;
         }

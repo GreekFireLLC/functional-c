@@ -8,11 +8,14 @@ public readonly record struct SourceLocation(string File, int Line, int Column)
     public override string ToString() => $"{File}({Line},{Column})";
 }
 
-/// <summary>A translator error, formatted in the conventional "file(line,col): error CODE: message" style.</summary>
-public sealed record Diagnostic(string Code, string Message, SourceLocation Location)
+/// <summary>
+/// A translator error or warning, formatted in the conventional "file(line,col): error CODE: message" style.
+/// A warning does not stop the translation.
+/// </summary>
+public sealed record Diagnostic(string Code, string Message, SourceLocation Location, bool IsWarning = false)
 {
     public override string ToString() =>
-        $"{Location.File}({Location.Line},{Location.Column}): error {Code}: {Message}";
+        $"{Location.File}({Location.Line},{Location.Column}): {(IsWarning ? "warning" : "error")} {Code}: {Message}";
 }
 
 /// <summary>Thrown by the lexer and parser, which stop at the first syntax error.</summary>

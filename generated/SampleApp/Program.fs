@@ -17,6 +17,11 @@ let inline fc'ignore (_value: 'T) : unit = ()
 /// Logical negation for the '!' operator.
 let inline fc'not (value: bool) : bool = not value
 
+/// C's conversions between integer types. Narrowing to 8 bits wraps around, as on the common C compilers.
+let inline fc'int value : int = int value
+let inline fc'char value : sbyte = sbyte value
+let inline fc'uchar value : byte = byte value
+
 // Program
 
 let rec sumSquares (n: int) : int =

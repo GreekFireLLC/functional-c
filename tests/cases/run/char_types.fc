@@ -1,0 +1,143 @@
+// C's char is an 8-bit integer: 'char' is signed (-128 to 127) and 'unsigned char' is 0 to 255.
+// Arithmetic promotes both to int first; storing the result back keeps the low 8 bits.
+
+char next(char c)
+{
+    return c + 1;                      // computed as an int, narrowed when it is returned
+}
+
+unsigned char low(int n)
+{
+    return n;                          // keeps the low 8 bits
+}
+
+bool isDigit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+int main()
+{
+    // A character literal is an int, as in C.
+    print('A');                        // 65
+    print('a' - 'A');                  // 32
+    print('\n');                       // 10
+    print('\0');                       // 0
+    print('\\');                       // 92
+    print('\'');                       // 39
+
+    char c = 'x';
+    print(c);                          // 120
+    print(next(c));                    // 121
+    print(c + 1000);                   // 1120: promoted to int, so nothing wraps here
+
+    // Narrowing wraps around.
+    char big = 200;
+    print(big);                        // -56
+    unsigned char ubig = 300;
+    print(ubig);                       // 44
+    unsigned char minus = -1;
+    print(minus);                      // 255
+    print(low(1000));                  // 232
+    print(next(127));                  // -128
+
+    // ++ and the compound assignments compute in int and narrow the result.
+    char top = 127;
+    top++;
+    print(top);                        // -128
+    unsigned char wrap = 250;
+    wrap += 10;
+    print(wrap);                       // 4
+    wrap -= 5;
+    print(wrap);                       // 255
+    wrap *= 2;
+    print(wrap);                       // 254
+    wrap /= 3;
+    print(wrap);                       // 84
+    wrap %= 10;
+    print(wrap);                       // 4
+    wrap--;
+    print(wrap);                       // 3
+
+    // A signed and an unsigned byte with the same bits are different numbers.
+    char s = -1;
+    unsigned char u = s;
+    print(u);                          // 255
+    print(s == u);                     // 0: after promotion they are -1 and 255
+    print(s < u);                      // 1
+    s = u;
+    print(s);                          // -1
+
+    // A char as a truth value, and a bool made from a char.
+    char zero = 0;
+    print(!zero);                      // 1
+    print(!c);                         // 0
+    print(c && zero);                  // 0
+    print(c ? 1 : 2);                  // 1
+    bool has = c;
+    print(has);                        // 1
+    char fromBool = has;
+    print(fromBool);                   // 1
+    print(isDigit('7'));               // 1
+    print(isDigit('x'));               // 0
+
+    // Branches of different types are promoted to int.
+    print(has ? c : 1000);             // 120
+
+    int count = 0;
+    while (c) {                        // 120, 60, 30, 15, 7, 3, 1, 0
+        c /= 2;
+        count++;
+    }
+    print(count);                      // 7
+
+    let copy = top;                    // a let keeps the type of its value: char
+    print(copy);                       // -128
+    return 0;
+}
+
+//! out: 65
+//! out: 32
+//! out: 10
+//! out: 0
+//! out: 92
+//! out: 39
+//! out: 120
+//! out: 121
+//! out: 1120
+//! out: -56
+//! out: 44
+//! out: 255
+//! out: 232
+//! out: -128
+//! out: -128
+//! out: 4
+//! out: 255
+//! out: 254
+//! out: 84
+//! out: 4
+//! out: 3
+//! out: 255
+//! out: 0
+//! out: 1
+//! out: -1
+//! out: 1
+//! out: 0
+//! out: 0
+//! out: 1
+//! out: 1
+//! out: 1
+//! out: 1
+//! out: 0
+//! out: 120
+//! out: 7
+//! out: -128
+//! fs-contains: let next (c: sbyte) : sbyte =
+//! fs-contains: (fc'char ((fc'int c) + 1))
+//! fs-contains: let low (n: int) : byte =
+//! fs-contains: let big = (-56y)
+//! fs-contains: let ubig = 44uy
+//! fs-contains: let minus = 255uy
+//! fs-contains: top <- (fc'char ((fc'int top) + 1))
+//! fs-contains: wrap <- (fc'uchar ((fc'int wrap) + 10))
+//! fs-contains: while (c <> 0y) do

@@ -1,0 +1,74 @@
+// Code that can never run is legal C. The translator checks it, warns (FC3016) and leaves it out,
+// so nothing after a return, break or continue reaches the F#. (With --strict it is an error.)
+
+int afterReturn(int x)
+{
+    return x + 1;
+    print(999);                        // never runs
+    return 0;
+}
+
+int afterBreak()
+{
+    int count = 0;
+    while (true) {
+        count++;
+        if (count == 3) {
+            break;
+            count = 888;               // never runs
+        }
+    }
+    return count;
+}
+
+int afterContinue()
+{
+    int sum = 0;
+    for (int i = 1; i <= 5; i++) {
+        if (i % 2 == 0) {
+            continue;
+            sum += 777;                // never runs
+        }
+        sum += i;
+    }
+    return sum;
+}
+
+// Both branches return, so the call after the 'if' cannot run. Because it is the only place where
+// the function calls itself, the F# function is not recursive.
+int afterIf(int x)
+{
+    if (x > 0) {
+        return 1;
+    } else {
+        return -1;
+    }
+    return afterIf(x - 1);
+}
+
+int main()
+{
+    print(afterReturn(1));             // 2
+    print(afterBreak());               // 3
+    print(afterContinue());            // 9
+    print(afterIf(5));                 // 1
+    print(afterIf(-5));                // -1
+    return 0;
+    print(666);                        // never runs
+}
+
+//! out: 2
+//! out: 3
+//! out: 9
+//! out: 1
+//! out: -1
+//! warning: FC3016 7:5 unreachable statement
+//! warning: FC3016 18:13 unreachable statement
+//! warning: FC3016 30:13 unreachable statement
+//! warning: FC3016 46:5 unreachable statement
+//! warning: FC3016 57:5 unreachable statement
+//! fs-contains: let afterIf (x: int) : int =
+//! fs-lacks: 999
+//! fs-lacks: 888
+//! fs-lacks: 777
+//! fs-lacks: 666

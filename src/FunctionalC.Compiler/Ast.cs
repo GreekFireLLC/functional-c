@@ -1,15 +1,29 @@
 namespace FunctionalC.Compiler;
 
-/// <summary>The value types of version 0.</summary>
+/// <summary>The value types: int and bool (version 0), and C's two 8-bit integer types (version 1.3).</summary>
 public enum FcType
 {
+    /// <summary>Signed 32-bit.</summary>
     Int,
     Bool,
+
+    /// <summary>'char' and 'signed char': signed 8-bit, as on the common x86 and x64 C compilers.</summary>
+    Char,
+
+    /// <summary>'unsigned char': unsigned 8-bit.</summary>
+    UChar,
 }
 
 public static class FcTypeNames
 {
-    public static string Name(this FcType type) => type == FcType.Int ? "int" : "bool";
+    public static string Name(this FcType type) => type switch
+    {
+        FcType.Int => "int",
+        FcType.Bool => "bool",
+        FcType.Char => "char",
+        FcType.UChar => "unsigned char",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
 
     public static string Name(this FcType? type) => type is { } t ? t.Name() : "<error>";
 }
@@ -71,10 +85,12 @@ public abstract class Expr(SourceLocation location)
     public FcType? Type { get; set; }
 
     /// <summary>
-    /// Set by the checker when this bool expression is used where an int is expected, which C allows
-    /// (true is 1 and false is 0). The emitter then converts it explicitly.
+    /// Set by the checker when this expression is used where another type is expected and C converts it
+    /// implicitly: a bool used as an int (true is 1), an int stored in a bool (nonzero is true), a char
+    /// promoted to int, an int narrowed to a char. F# never converts implicitly, so the emitter writes
+    /// the conversion out.
     /// </summary>
-    public bool ConvertToInt { get; set; }
+    public FcType? ConvertTo { get; set; }
 }
 
 public sealed class IntLiteralExpr(long value, SourceLocation location) : Expr(location)
@@ -99,6 +115,13 @@ public sealed class NameExpr(string name, SourceLocation location) : Expr(locati
 public sealed class UnaryExpr(UnaryOp op, Expr operand, SourceLocation location) : Expr(location)
 {
     public UnaryOp Op { get; } = op;
+    public Expr Operand { get; } = operand;
+}
+
+/// <summary>"(type) operand": an explicit conversion.</summary>
+public sealed class CastExpr(FcType target, Expr operand, SourceLocation location) : Expr(location)
+{
+    public FcType Target { get; } = target;
     public Expr Operand { get; } = operand;
 }
 
@@ -164,18 +187,24 @@ public abstract class Stmt(SourceLocation location)
 /// <summary>"{ ... }": a nested block with its own scope.</summary>
 public sealed class BlockStmt(IReadOnlyList<Stmt> statements, SourceLocation location) : Stmt(location)
 {
-    public IReadOnlyList<Stmt> Statements { get; } = statements;
+    /// <summary>The checker removes statements that can never run, so the emitter only sees live code.</summary>
+    public IReadOnlyList<Stmt> Statements { get; set; } = statements;
 }
 
 /// <summary>A lone ";".</summary>
 public sealed class EmptyStmt(SourceLocation location) : Stmt(location);
 
 /// <summary>One "name = initializer" part of a typed declaration.</summary>
-public sealed class VarDeclarator(string name, SourceLocation nameLocation, Expr initializer)
+public sealed class VarDeclarator(string name, SourceLocation nameLocation, Expr initializer, bool hasInitializer)
 {
     public string Name { get; } = name;
     public SourceLocation NameLocation { get; } = nameLocation;
+
+    /// <summary>For "int x;" (no initializer in the source) the parser supplies a literal 0 or false.</summary>
     public Expr Initializer { get; } = initializer;
+
+    /// <summary>False for "int x;", which C leaves indeterminate and Functional C starts at zero.</summary>
+    public bool HasInitializer { get; } = hasInitializer;
 
     /// <summary>Set by the checker.</summary>
     public ValueSymbol? Symbol { get; set; }
@@ -308,7 +337,12 @@ public sealed class FunctionDecl(
     public string Name { get; } = name;
     public SourceLocation NameLocation { get; } = nameLocation;
     public IReadOnlyList<Parameter> Parameters { get; } = parameters;
-    public IReadOnlyList<Stmt> Body { get; } = body;
+
+    /// <summary>
+    /// The checker removes statements that can never run, and adds a final "return 0;" (or false) to a
+    /// function that can reach its end, so the emitter always sees a body whose every path returns.
+    /// </summary>
+    public IReadOnlyList<Stmt> Body { get; set; } = body;
     public SourceLocation CloseBraceLocation { get; } = closeBraceLocation;
 
     /// <summary>Set by the checker.</summary>

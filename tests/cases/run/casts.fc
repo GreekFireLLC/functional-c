@@ -1,0 +1,45 @@
+// A cast "(type) value" is the explicit form of the conversions C applies implicitly.
+// It binds as tightly as unary minus: "(char) n + 200" converts only n.
+
+int main()
+{
+    int n = 1000;
+    print((char) n);                   // -24: the low 8 bits of 1000, read as signed
+    print((unsigned char) n);          // 232: the same bits, read as unsigned
+    print((bool) n);                   // 1
+    print((int) true);                 // 1
+    print((char) n + 200);             // 176: -24 + 200
+    print((char) (n + 200));           // -80: the low 8 bits of 1200
+    print((unsigned char) -1);         // 255
+    print((signed char) 200);          // -56
+    print((int) (char) 300);           // 44
+    print(-(char) 100);                // -100
+    print((bool) 0 + (bool) 5 + (bool) -5); // 2
+    print((_Bool) 9);                  // 1: _Bool is C99's own spelling of bool
+
+    char c = (char) 'A' + 2;
+    print(c);                          // 67
+    let truncated = (unsigned char) (n * n);
+    print(truncated);                  // 64: the low 8 bits of 1000000
+    print((int) n);                    // 1000: a cast to the same type changes nothing
+    return (unsigned char) 256;        // exit code 0
+}
+
+//! out: -24
+//! out: 232
+//! out: 1
+//! out: 1
+//! out: 176
+//! out: -80
+//! out: 255
+//! out: -56
+//! out: 44
+//! out: -100
+//! out: 2
+//! out: 1
+//! out: 67
+//! out: 64
+//! out: 1000
+//! exit: 0
+//! fs-contains: fc'print (fc'int (fc'char n))
+//! fs-contains: let truncated = (fc'uchar (n * n))

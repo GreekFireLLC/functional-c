@@ -1,0 +1,35 @@
+// 'byte' and 'sbyte' are ordinary names in C, and they are also the F# functions that convert to
+// 8 bits. The generated code converts through the prelude's fc'int, fc'char and fc'uchar, which are
+// defined before any user code, so a source name cannot get in the way of a conversion.
+
+int sbyte(int n)
+{
+    return n + 1;
+}
+
+unsigned char twice(unsigned char byte)
+{
+    return byte * 2;                   // promoted, doubled, narrowed: all while a 'byte' is in scope
+}
+
+int main()
+{
+    char byte = 100;
+    int uint8 = 3;
+    byte += 100;                       // 200 wraps to -56
+    print(byte);                       // -56
+    unsigned char int8 = byte;
+    print(int8);                       // 200
+    print(twice(int8));                // 144: the low 8 bits of 400
+    print(sbyte(uint8));               // 4
+    print((char) sbyte(127));          // -128
+    return 0;
+}
+
+//! out: -56
+//! out: 200
+//! out: 144
+//! out: 4
+//! out: -128
+//! fs-contains: let twice (byte: byte) : byte =
+//! fs-contains: let mutable byte = 100y

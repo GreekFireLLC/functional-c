@@ -38,6 +38,7 @@ Related branches in this repository:
 | `Makefile` | Cross-platform build/sample/test targets (`make`, `make sample`, `make test`) |
 | `verify.ps1` | End-to-end verification script writing `TEST-RESULTS.md` |
 | `docs/NATIVE-C.md` | Full design, translation rules, and verification documentation |
+| `docs/COMPARISON.md` | What Functional C can do compared to other functional languages and standard C |
 | `TEST-RESULTS.md` | Exact commands, exit codes, and outputs from the latest `verify.ps1` run |
 
 ## Quick start

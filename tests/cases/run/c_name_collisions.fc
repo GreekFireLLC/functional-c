@@ -1,0 +1,47 @@
+// Source names that collide with C standard library functions, macros, types, or translator internals.
+// The C emitter prefixes every user identifier with 'u_' and internal names with 'fc_', so none of these
+// can collide with <stdio.h>, <stdlib.h>, <stdint.h>, preprocessor macros, or runtime helpers.
+
+int printf(int scanf)
+{
+    return scanf + 10;
+}
+
+int exit(int abort)
+{
+    return abort * 3;
+}
+
+int fc_add(int u_x)
+{
+    return u_x + 100;
+}
+
+int main()
+{
+    int NULL = 5;
+    int EOF = 7;
+    int stdin = 2;
+    int stdout = 3;
+    int stderr = 4;
+    int int32_t = 9;
+    let __FILE__ = 11;
+    let __LINE__ = 13;
+    let free = (int malloc) => malloc + NULL + EOF;
+
+    print(printf(NULL));               // 15
+    print(exit(EOF));                  // 21
+    print(fc_add(stdin + stdout + stderr)); // 109
+    print(int32_t + __FILE__ + __LINE__);   // 33
+    print(free(8));                    // 20
+    return 0;
+}
+
+//! out: 15
+//! out: 21
+//! out: 109
+//! out: 33
+//! out: 20
+//! c-contains: int32_t u_printf(int32_t u_scanf)
+//! c-contains: int32_t u_fc_add(int32_t u_u_x)
+//! c-contains: const int32_t u___LINE__ = 13;

@@ -30,10 +30,10 @@ function Invoke-Native([string]$file, [string[]]$arguments) {
 
 $steps = New-Object System.Collections.Generic.List[object]
 
-function Step([string]$title, [string[]]$arguments, [int]$expectedExit = 0, [scriptblock]$extraCheck = $null) {
-    $command = 'dotnet ' + ($arguments -join ' ')
+function Step([string]$title, [string]$exe, [string[]]$arguments, [int]$expectedExit = 0, [scriptblock]$extraCheck = $null) {
+    $command = "$exe " + ($arguments -join ' ')
     Write-Host "> $command"
-    $r = Invoke-Native 'dotnet' $arguments
+    $r = Invoke-Native $exe $arguments
     $problems = @()
     if ($r.ExitCode -ne $expectedExit) { $problems += "exit code $($r.ExitCode), expected $expectedExit" }
     if ($extraCheck) { foreach ($p in @(& $extraCheck $r)) { if ($p) { $problems += $p } } }
@@ -52,30 +52,46 @@ function Fence([string]$text) {
 # ---------------------------------------------------------------- environment
 $sdkVersion = (Invoke-Native 'dotnet' @('--version')).Stdout.Trim()
 $sdkList = (Invoke-Native 'dotnet' @('--list-sdks')).Stdout.Trim()
+$gccVersion = ((Invoke-Native 'gcc' @('--version')).Stdout -split "`n" | Select-Object -First 1).Trim()
 $targetFramework = ([xml](Get-Content 'src/FunctionalC.Compiler/FunctionalC.Compiler.csproj')).Project.PropertyGroup.TargetFramework | Select-Object -First 1
 
-# ---------------------------------------------------------------- README workflow
-Step 'Build the translator' @('build', 'src/FunctionalC.Compiler/FunctionalC.Compiler.csproj') | Out-Null
+# ---------------------------------------------------------------- README workflow (F# and C)
+Step 'Build the translator' 'dotnet' @('build', 'src/FunctionalC.Compiler/FunctionalC.Compiler.csproj') | Out-Null
 
-Step 'Translate the sample' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'examples/sum_squares.fc', '--out', 'generated/SampleApp/Program.fs') | Out-Null
+Step 'Translate the sample to F#' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'examples/sum_squares.fc', '--out', 'generated/SampleApp/Program.fs') | Out-Null
 
-Step 'Build the generated F#' @('build', 'generated/SampleApp/SampleApp.fsproj') | Out-Null
+Step 'Build the generated F#' 'dotnet' @('build', 'generated/SampleApp/SampleApp.fsproj') | Out-Null
 
-$sample = Step 'Run the generated program' @('run', '--no-build', '--project', 'generated/SampleApp') 0 {
+$sample = Step 'Run the generated F# program' 'dotnet' @('run', '--no-build', '--project', 'generated/SampleApp') 0 {
+    param($r)
+    if ($r.Stdout -ne "55`n") { "stdout was '$($r.Stdout -replace "`r", '\r' -replace "`n", '\n')', expected '55\n'" }
+}
+
+Step 'Translate the sample to C' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'examples/sum_squares.fc', '--out', 'generated/SampleAppC/program.c') | Out-Null
+
+Step 'Compile the generated C (warnings as errors)' 'gcc' @('-std=c17', '-Wall', '-Wextra', '-Werror', 'generated/SampleAppC/program.c', '-o', 'generated/SampleAppC/program.exe') | Out-Null
+
+$sampleC = Step 'Run the generated C program' (Join-Path $root 'generated/SampleAppC/program.exe') @() 0 {
     param($r)
     if ($r.Stdout -ne "55`n") { "stdout was '$($r.Stdout -replace "`r", '\r' -replace "`n", '\n')', expected '55\n'" }
 }
 
 $hashBefore = (Get-FileHash 'generated/SampleApp/Program.fs').Hash
-Step 'A failing translation must not touch the existing output' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'tests/cases/reject/immutable_reassign.fc', '--out', 'generated/SampleApp/Program.fs') 1 {
+Step 'A failing translation must not touch the existing F# output' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'tests/cases/reject/immutable_reassign.fc', '--out', 'generated/SampleApp/Program.fs') 1 {
     param($r)
     if ((Get-FileHash 'generated/SampleApp/Program.fs').Hash -ne $hashBefore) { 'generated/SampleApp/Program.fs changed' }
 } | Out-Null
 
-# ---------------------------------------------------------------- acceptance tests
-Step 'Build the test harness' @('build', 'tests/FunctionalC.Tests/FunctionalC.Tests.csproj') | Out-Null
+$hashBeforeC = (Get-FileHash 'generated/SampleAppC/program.c').Hash
+Step 'A failing translation must not touch the existing C output' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'tests/cases/reject/immutable_reassign.fc', '--out', 'generated/SampleAppC/program.c') 1 {
+    param($r)
+    if ((Get-FileHash 'generated/SampleAppC/program.c').Hash -ne $hashBeforeC) { 'generated/SampleAppC/program.c changed' }
+} | Out-Null
+
+# ---------------------------------------------------------------- acceptance tests (F# and C)
+Step 'Build the test harness' 'dotnet' @('build', 'tests/FunctionalC.Tests/FunctionalC.Tests.csproj') | Out-Null
 $reportPath = 'tests/work/harness-report.md'
-$harness = Step 'Run the acceptance tests' @('run', '--no-build', '--project', 'tests/FunctionalC.Tests', '--', '--report', $reportPath)
+$harness = Step 'Run the acceptance tests (F# and C)' 'dotnet' @('run', '--no-build', '--project', 'tests/FunctionalC.Tests', '--', '--report', $reportPath)
 $harnessSummary = ($harness.Stdout -split "`n" | Where-Object { $_ -match '^Passed: ' } | Select-Object -Last 1)
 
 # ---------------------------------------------------------------- report
@@ -90,6 +106,7 @@ Add
 Add "- Date: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))"
 Add "- OS: $([System.Environment]::OSVersion.VersionString)"
 Add "- .NET SDK used (``dotnet --version``): **$sdkVersion**"
+Add "- C compiler used (``gcc --version``): **$gccVersion**"
 Add "- Target framework of all projects: **$targetFramework**"
 Add "- Installed SDKs (``dotnet --list-sdks``):"
 Add
@@ -98,7 +115,8 @@ Add
 Add "## Summary"
 Add
 Add "- Overall: **$(if ($allOk) { 'all steps passed' } else { 'FAILURES - see below' })**"
-Add "- Sum-of-squares program: stdout ``$(($sample.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sample.ExitCode)**"
+Add "- Sum-of-squares program (F#): stdout ``$(($sample.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sample.ExitCode)**"
+Add "- Sum-of-squares program (C): stdout ``$(($sampleC.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sampleC.ExitCode)**"
 Add "- Acceptance tests: $harnessSummary"
 Add
 Add '| # | Step | Command | Exit code (expected) | Result |'

@@ -1,4 +1,6 @@
 bin/
 obj/
 tests/work/
+generated/SampleAppC/program.exe
+generated/SampleAppC/program
 *.tmp

@@ -8,20 +8,25 @@ namespace FunctionalC.Tests;
 
 /// <summary>
 /// Acceptance-test harness (no test framework). Behavioral tests go through the whole pipeline:
-/// .fc file → translator CLI → generated .fs → `dotnet build` (warnings are errors) → run the program.
+/// - F# target: .fc file → translator CLI → generated .fs → `dotnet build` (warnings are errors) → run.
+/// - C target:  .fc file → translator CLI → generated .c  → `gcc -std=c17 -Wall -Wextra -Werror` → run.
 /// Rejection tests check the CLI's exit code, diagnostics (code, line, column, message) and that no output was written.
 ///
-/// Directives in a case file: "//! out:", "//! exit:", "//! stderr-contains:", "//! fs-contains:", "//! fs-lacks:",
+/// Directives in a case file: "//! out:", "//! exit:", "//! stderr-contains:", "//! c-stderr-contains:",
+/// "//! fs-contains:", "//! fs-lacks:", "//! c-contains:", "//! c-lacks:",
 /// "//! error: FCnnnn line:col text", "//! warning: FCnnnn line:col text" (a behavioral test must list every
 /// warning the translator gives) and "//! flags: --strict".
 ///
-/// Usage: dotnet run --project tests/FunctionalC.Tests -- [--report path.md] [--filter text] [--parallel n]
+/// Usage: dotnet run --project tests/FunctionalC.Tests -- [--target both|fsharp|c] [--report path.md] [--filter text] [--parallel n]
 /// </summary>
 internal static partial class Program
 {
     private static string _root = "";
     private static string _work = "";
     private static string _targetFramework = "";
+    private static string _cCompiler = "gcc";
+    private static bool _runFSharp = true;
+    private static bool _runC = true;
 
     private static async Task<int> Main(string[] args)
     {
@@ -35,6 +40,17 @@ internal static partial class Program
                 case "--report": reportPath = Path.GetFullPath(args[++i]); break;
                 case "--filter": filter = args[++i]; break;
                 case "--parallel": parallel = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+                case "--target":
+                    switch (args[++i].ToLowerInvariant())
+                    {
+                        case "both": _runFSharp = true; _runC = true; break;
+                        case "fsharp": case "fs": _runFSharp = true; _runC = false; break;
+                        case "c": _runFSharp = false; _runC = true; break;
+                        default:
+                            Console.Error.WriteLine($"unknown target '{args[i]}' (expected 'both', 'fsharp' or 'c')");
+                            return 2;
+                    }
+                    break;
                 default:
                     Console.Error.WriteLine($"unknown argument '{args[i]}'");
                     return 2;
@@ -146,38 +162,77 @@ internal static partial class Program
 
     private static IEnumerable<TestCase> DiscoverTests()
     {
-        // sum_squares.fc is the original sample and is kept exactly as first written, so its expectation lives here.
-        yield return new TestCase("example: examples/sum_squares.fc prints 55", "end-to-end",
-            () => RunProgramCase("examples/sum_squares.fc", "example-sum_squares",
-                new CaseSpec { Out = ["55"], Exit = "0" }));
+        var exampleFiles = Directory.GetFiles(Path.Combine(_root, "examples"), "*.fc").Order(StringComparer.Ordinal).ToList();
+        var runFiles = Directory.GetFiles(Path.Combine(_root, "tests", "cases", "run"), "*.fc").Order(StringComparer.Ordinal).ToList();
+        var rejectFiles = Directory.GetFiles(Path.Combine(_root, "tests", "cases", "reject"), "*.fc").Order(StringComparer.Ordinal).ToList();
 
-        // Every other example lists its expected output in '//! out:' lines; one without them fails instead of passing vacuously.
-        foreach (var file in Directory.GetFiles(Path.Combine(_root, "examples"), "*.fc").Order(StringComparer.Ordinal))
+        if (_runFSharp)
         {
-            string name = Path.GetFileNameWithoutExtension(file);
-            if (name == "sum_squares")
+            // sum_squares.fc is the original sample and is kept exactly as first written, so its expectation lives here.
+            yield return new TestCase("example: examples/sum_squares.fc prints 55", "end-to-end (F#)",
+                () => RunProgramCase("examples/sum_squares.fc", "example-sum_squares",
+                    new CaseSpec { Out = ["55"], Exit = "0" }, EmitTarget.FSharp));
+
+            // Every other example lists its expected output in '//! out:' lines; one without them fails instead of passing vacuously.
+            foreach (var file in exampleFiles)
             {
-                continue;
+                string name = Path.GetFileNameWithoutExtension(file);
+                if (name == "sum_squares")
+                {
+                    continue;
+                }
+
+                string relative = Relative(file);
+                yield return new TestCase($"example: {relative}", "end-to-end (F#)", async () =>
+                {
+                    var spec = CaseSpec.Parse(File.ReadAllLines(file));
+                    Assert(spec.Out.Count > 0, $"{relative} has no '//! out:' lines giving its expected output");
+                    return await RunProgramCase(relative, "example-" + name, spec, EmitTarget.FSharp);
+                });
             }
 
-            string relative = Relative(file);
-            yield return new TestCase($"example: {relative}", "end-to-end", async () =>
+            foreach (var file in runFiles)
             {
-                var spec = CaseSpec.Parse(File.ReadAllLines(file));
-                Assert(spec.Out.Count > 0, $"{relative} has no '//! out:' lines giving its expected output");
-                return await RunProgramCase(relative, "example-" + name, spec);
-            });
+                string relative = Relative(file);
+                string name = Path.GetFileNameWithoutExtension(file);
+                yield return new TestCase($"run: {name}", "end-to-end (F#)",
+                    () => RunProgramCase(relative, "run-" + name, CaseSpec.Parse(File.ReadAllLines(file)), EmitTarget.FSharp));
+            }
         }
 
-        foreach (var file in Directory.GetFiles(Path.Combine(_root, "tests", "cases", "run"), "*.fc").Order(StringComparer.Ordinal))
+        if (_runC)
         {
-            string relative = Relative(file);
-            string name = Path.GetFileNameWithoutExtension(file);
-            yield return new TestCase($"run: {name}", "end-to-end",
-                () => RunProgramCase(relative, "run-" + name, CaseSpec.Parse(File.ReadAllLines(file))));
+            yield return new TestCase("c-example: examples/sum_squares.fc prints 55", "end-to-end (C)",
+                () => RunProgramCase("examples/sum_squares.fc", "c-example-sum_squares",
+                    new CaseSpec { Out = ["55"], Exit = "0" }, EmitTarget.C));
+
+            foreach (var file in exampleFiles)
+            {
+                string name = Path.GetFileNameWithoutExtension(file);
+                if (name == "sum_squares")
+                {
+                    continue;
+                }
+
+                string relative = Relative(file);
+                yield return new TestCase($"c-example: {relative}", "end-to-end (C)", async () =>
+                {
+                    var spec = CaseSpec.Parse(File.ReadAllLines(file));
+                    Assert(spec.Out.Count > 0, $"{relative} has no '//! out:' lines giving its expected output");
+                    return await RunProgramCase(relative, "c-example-" + name, spec, EmitTarget.C);
+                });
+            }
+
+            foreach (var file in runFiles)
+            {
+                string relative = Relative(file);
+                string name = Path.GetFileNameWithoutExtension(file);
+                yield return new TestCase($"c-run: {name}", "end-to-end (C)",
+                    () => RunProgramCase(relative, "c-run-" + name, CaseSpec.Parse(File.ReadAllLines(file)), EmitTarget.C));
+            }
         }
 
-        foreach (var file in Directory.GetFiles(Path.Combine(_root, "tests", "cases", "reject"), "*.fc").Order(StringComparer.Ordinal))
+        foreach (var file in rejectFiles)
         {
             string relative = Relative(file);
             string name = Path.GetFileNameWithoutExtension(file);
@@ -186,12 +241,24 @@ internal static partial class Program
         }
 
         yield return new TestCase("cli: failed translation leaves the existing output file untouched", "cli", FailedTranslationPreservesOutput);
-        yield return new TestCase("cli: compiler run as a separate process (dotnet FunctionalC.Compiler.dll)", "end-to-end", CompilerAsSeparateProcess);
         yield return new TestCase("cli: usage and I/O errors give distinct exit codes", "cli", () => Task.FromResult(UsageErrors()));
-        yield return new TestCase("translator: output is deterministic", "translator", () => Task.FromResult(DeterministicOutput()));
-        yield return new TestCase("translator: sum_squares emits let rec, a curried lambda, and a separate entry point", "translator", () => Task.FromResult(SumSquaresShape()));
         yield return new TestCase("lexer: multi-character operators win over their prefixes", "translator", () => Task.FromResult(LexerOperators()));
-        yield return new TestCase("reference: hand-written examples/sum_squares.reference.fs (not translator output)", "reference", ReferenceFixture);
+
+        if (_runFSharp)
+        {
+            yield return new TestCase("cli: compiler run as a separate process (dotnet FunctionalC.Compiler.dll)", "end-to-end (F#)", CompilerAsSeparateProcess);
+            yield return new TestCase("translator: output is deterministic", "translator", () => Task.FromResult(DeterministicOutput(EmitTarget.FSharp)));
+            yield return new TestCase("translator: sum_squares emits let rec, a curried lambda, and a separate entry point", "translator", () => Task.FromResult(SumSquaresShape()));
+            yield return new TestCase("reference: hand-written examples/sum_squares.reference.fs (not translator output)", "reference", ReferenceFixture);
+        }
+
+        if (_runC)
+        {
+            yield return new TestCase("c-cli: failed translation leaves the existing C output file untouched", "cli", FailedCTranslationPreservesOutput);
+            yield return new TestCase("c-cli: compiler run as a separate process (--out .c and --target c)", "end-to-end (C)", CCompilerAsSeparateProcess);
+            yield return new TestCase("c-translator: output is deterministic", "translator", () => Task.FromResult(DeterministicOutput(EmitTarget.C)));
+            yield return new TestCase("c-translator: sum_squares emits lifted lambda, runtime helpers, and separate C main", "translator", () => Task.FromResult(SumSquaresCShape()));
+        }
     }
 
     private static string Relative(string path) => Path.GetRelativePath(_root, path).Replace('\\', '/');
@@ -203,8 +270,11 @@ internal static partial class Program
         public List<string> Out { get; init; } = [];
         public string Exit { get; set; } = "0";
         public List<string> StderrContains { get; } = [];
+        public List<string> CStderrContains { get; } = [];
         public List<string> FsContains { get; } = [];
         public List<string> FsLacks { get; } = [];
+        public List<string> CContains { get; } = [];
+        public List<string> CLacks { get; } = [];
         public List<ExpectedError> Errors { get; } = [];
         public List<ExpectedError> Warnings { get; } = [];
         public bool Strict { get; set; }
@@ -228,8 +298,11 @@ internal static partial class Program
                     case "out": spec.Out.Add(value); break;
                     case "exit": spec.Exit = value; break;
                     case "stderr-contains": spec.StderrContains.Add(value); break;
+                    case "c-stderr-contains": spec.CStderrContains.Add(value); break;
                     case "fs-contains": spec.FsContains.Add(value); break;
                     case "fs-lacks": spec.FsLacks.Add(value); break;
+                    case "c-contains": spec.CContains.Add(value); break;
+                    case "c-lacks": spec.CLacks.Add(value); break;
                     case "flags":
                         if (value != "--strict")
                         {
@@ -286,12 +359,32 @@ internal static partial class Program
 
     // ------------------------------------------------------------ pipeline helpers
 
-    private static (int Exit, string Stdout, string Stderr) TranslateWithCli(string input, string output, bool strict = false)
+    private static (int Exit, string Stdout, string Stderr) TranslateWithCli(string input, string output, bool strict = false, EmitTarget? target = null)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
-        int exit = Cli.Run(strict ? [input, "--out", output, "--strict"] : [input, "--out", output], stdout, stderr);
+        var cliArgs = new List<string> { input, "--out", output };
+        if (target is { } explicitTarget)
+        {
+            cliArgs.Add("--target");
+            cliArgs.Add(explicitTarget == EmitTarget.C ? "c" : "fsharp");
+        }
+
+        if (strict)
+        {
+            cliArgs.Add("--strict");
+        }
+
+        int exit = Cli.Run([.. cliArgs], stdout, stderr);
         return (exit, stdout.ToString(), stderr.ToString());
+    }
+
+    private static async Task<(int Exit, string Stdout, string Stderr)> BuildAndRunC(string directory, string cSourcePath)
+    {
+        string exe = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
+        var build = await RunProcess(_cCompiler, ["-std=c17", "-Wall", "-Wextra", "-Werror", cSourcePath, "-o", exe], directory, TimeSpan.FromMinutes(2));
+        Assert(build.Exit == 0, $"C build failed (exit {build.Exit}):\n{build.Stdout}\n{build.Stderr}\n--- generated C ---\n{File.ReadAllText(cSourcePath)}");
+        return await RunProcess(exe, [], directory, TimeSpan.FromSeconds(60));
     }
 
     private static string CreateFSharpProject(string directory)
@@ -368,13 +461,16 @@ internal static partial class Program
 
     // ------------------------------------------------------------ behavioral (end-to-end) cases
 
-    private static async Task<string> RunProgramCase(string input, string workName, CaseSpec spec)
+    private static async Task<string> RunProgramCase(string input, string workName, CaseSpec spec, EmitTarget target)
     {
         string directory = Path.Combine(_work, workName);
-        string project = CreateFSharpProject(directory);
-        string output = Path.Combine(directory, "Program.fs");
+        Directory.CreateDirectory(directory);
+        string output = target == EmitTarget.C
+            ? Path.Combine(directory, "program.c")
+            : Path.Combine(directory, "Program.fs");
+        string? project = target == EmitTarget.FSharp ? CreateFSharpProject(directory) : null;
 
-        var translate = TranslateWithCli(input, output, spec.Strict);
+        var translate = TranslateWithCli(input, output, spec.Strict, target);
         Assert(translate.Exit == Cli.Success, $"translation of {input} failed (exit {translate.Exit}):\n{translate.Stderr}");
 
         // A successful translation may warn. Every warning must be expected, so a new one cannot slip in unnoticed.
@@ -388,18 +484,23 @@ internal static partial class Program
         Assert(warnings.Count == spec.Warnings.Count,
             $"expected {spec.Warnings.Count} warning(s) but the translator gave {warnings.Count}:\n{translate.Stderr}");
 
-        string fsharp = File.ReadAllText(output);
-        foreach (var fragment in spec.FsContains)
+        string generated = File.ReadAllText(output);
+        var containsList = target == EmitTarget.C ? spec.CContains : spec.FsContains;
+        var lacksList = target == EmitTarget.C ? spec.CLacks : spec.FsLacks;
+        string langLabel = target == EmitTarget.C ? "C" : "F#";
+        foreach (var fragment in containsList)
         {
-            Assert(fsharp.Contains(fragment, StringComparison.Ordinal), $"generated F# does not contain '{fragment}':\n{fsharp}");
+            Assert(generated.Contains(fragment, StringComparison.Ordinal), $"generated {langLabel} does not contain '{fragment}':\n{generated}");
         }
 
-        foreach (var fragment in spec.FsLacks)
+        foreach (var fragment in lacksList)
         {
-            Assert(!fsharp.Contains(fragment, StringComparison.Ordinal), $"generated F# should not contain '{fragment}':\n{fsharp}");
+            Assert(!generated.Contains(fragment, StringComparison.Ordinal), $"generated {langLabel} should not contain '{fragment}':\n{generated}");
         }
 
-        var run = await BuildAndRun(directory, project);
+        var run = target == EmitTarget.C
+            ? await BuildAndRunC(directory, output)
+            : await BuildAndRun(directory, project!);
         string expectedStdout = string.Concat(spec.Out.Select(l => l + "\n"));
         string summary = $"exit code {run.Exit}; stdout {(run.Stdout.Length == 0 ? "(empty)" : string.Join(" | ", run.Stdout.TrimEnd('\n').Split('\n')))}";
         if (warnings.Count > 0)
@@ -421,18 +522,33 @@ internal static partial class Program
             Assert(run.Exit == expectedExit, $"expected exit code {expectedExit} but got {run.Exit}\n{Block("stderr", run.Stderr)}");
         }
 
-        foreach (var fragment in spec.StderrContains)
+        IEnumerable<string> expectedStderr = target == EmitTarget.C
+            ? (spec.CStderrContains.Count > 0
+                ? spec.CStderrContains
+                : spec.StderrContains.Select(MapFSharpStderrForC))
+            : spec.StderrContains;
+
+        bool checkedStderr = false;
+        foreach (var fragment in expectedStderr)
         {
+            checkedStderr = true;
             Assert(run.Stderr.Contains(fragment, StringComparison.Ordinal), $"stderr does not contain '{fragment}':\n{run.Stderr}");
         }
 
-        if (spec.StderrContains.Count > 0)
+        if (checkedStderr)
         {
             summary += $"; stderr: {FirstLine(run.Stderr)}";
         }
 
         return summary;
     }
+
+    private static string MapFSharpStderrForC(string fragment) => fragment switch
+    {
+        "System.DivideByZeroException" => "division by zero",
+        "System.OverflowException" => "overflow",
+        _ => fragment,
+    };
 
     // ------------------------------------------------------------ rejection cases
 
@@ -531,6 +647,8 @@ internal static partial class Program
             (["examples/sum_squares.fc", "--out"], Cli.UsageError),
             (["--bogus"], Cli.UsageError),
             (["--strict"], Cli.UsageError),
+            (["examples/sum_squares.fc", "--out", "out.c", "--target"], Cli.UsageError),
+            (["examples/sum_squares.fc", "--out", "out.c", "--target", "rust"], Cli.UsageError),
             (["a.fc", "b.fc", "--out", "c.fs"], Cli.UsageError),
             (["tests/does-not-exist.fc", "--out", Path.Combine(directory, "x.fs")], Cli.IoError),
             (["--help"], Cli.Success),
@@ -549,14 +667,91 @@ internal static partial class Program
         return string.Join("; ", lines);
     }
 
-    private static string DeterministicOutput()
+    private static string DeterministicOutput(EmitTarget target)
     {
         string source = File.ReadAllText(Path.Combine(_root, "tests", "cases", "run", "evaluation_order.fc"));
-        var first = Translator.Translate(source, "evaluation_order.fc");
-        var second = Translator.Translate(source, "evaluation_order.fc");
+        var first = Translator.Translate(source, "evaluation_order.fc", target: target);
+        var second = Translator.Translate(source, "evaluation_order.fc", target: target);
         Assert(first.Success && second.Success, "translation failed");
-        Assert(first.FSharpCode == second.FSharpCode, "two translations of the same source differ");
-        return $"{first.FSharpCode!.Length} characters, identical across runs";
+        Assert(first.Code == second.Code, "two translations of the same source differ");
+        return $"{first.Code!.Length} characters, identical across runs";
+    }
+
+    private static Task<string> FailedCTranslationPreservesOutput()
+    {
+        string directory = Path.Combine(_work, "c-cli-preserve");
+        Directory.CreateDirectory(directory);
+        string output = Path.Combine(directory, "program.c");
+
+        var good = TranslateWithCli("examples/sum_squares.fc", output);
+        Assert(good.Exit == Cli.Success, $"good translation failed:\n{good.Stderr}");
+        string before = File.ReadAllText(output);
+        var stampBefore = File.GetLastWriteTimeUtc(output);
+
+        string bad = Path.Combine(directory, "bad.fc");
+        File.WriteAllText(bad, "int main()\n{\n    let x = 1;\n    x = 2;\n    return x;\n}\n");
+        var failed = TranslateWithCli(bad, output);
+        Assert(failed.Exit == Cli.SourceErrors, $"bad translation should exit {Cli.SourceErrors} but exited {failed.Exit}");
+        Assert(File.ReadAllText(output) == before, "the existing C output file was modified by a failed translation");
+        Assert(File.GetLastWriteTimeUtc(output) == stampBefore, "the existing C output file's timestamp changed");
+
+        var leftovers = Directory.GetFiles(directory).Select(Path.GetFileName).Where(f => f!.EndsWith(".tmp", StringComparison.Ordinal)).ToList();
+        Assert(leftovers.Count == 0, $"temporary files were left behind: {string.Join(", ", leftovers)}");
+        return Task.FromResult($"C output unchanged after failed translation; stderr:\n{failed.Stderr.TrimEnd()}");
+    }
+
+    private static async Task<string> CCompilerAsSeparateProcess()
+    {
+        string dll = Path.Combine(AppContext.BaseDirectory, "FunctionalC.Compiler.dll");
+        string runtimeConfig = Path.Combine(AppContext.BaseDirectory, "FunctionalC.Compiler.runtimeconfig.json");
+        if (!File.Exists(runtimeConfig))
+        {
+            throw new TestSkipped($"{runtimeConfig} not found next to the harness; cannot launch the compiler as its own process");
+        }
+
+        string directory = Path.Combine(_work, "c-cli-process");
+        Directory.CreateDirectory(directory);
+        string output = Path.Combine(directory, "program.c");
+        // Auto-detected C target from .c extension.
+        var translate = await RunProcess("dotnet", [dll, "examples/sum_squares.fc", "--out", output], _root, TimeSpan.FromMinutes(1));
+        Assert(translate.Exit == 0, $"compiler process exited {translate.Exit}:\n{translate.Stdout}\n{translate.Stderr}");
+
+        var run = await BuildAndRunC(directory, output);
+        Assert(run.Stdout == "55\n" && run.Exit == 0, $"expected 55 / exit 0 but got exit {run.Exit}:\n{run.Stdout}\n{run.Stderr}");
+
+        // Explicit --target c into a non-.c extension.
+        string explicitOut = Path.Combine(directory, "explicit.c.txt");
+        var translate2 = await RunProcess("dotnet", [dll, "examples/sum_squares.fc", "--out", explicitOut, "--target", "c"], _root, TimeSpan.FromMinutes(1));
+        Assert(translate2.Exit == 0, $"explicit --target c exited {translate2.Exit}:\n{translate2.Stderr}");
+        Assert(File.ReadAllText(explicitOut) == File.ReadAllText(output), "auto-detected .c output and explicit --target c output differ");
+
+        var bad = await RunProcess("dotnet", [dll, "tests/cases/reject/immutable_reassign.fc", "--out", Path.Combine(directory, "bad.c")], _root, TimeSpan.FromMinutes(1));
+        Assert(bad.Exit == Cli.SourceErrors, $"compiler process should exit {Cli.SourceErrors} on a bad program but exited {bad.Exit}");
+        Assert(bad.Stdout.Length == 0, $"diagnostics must go to stderr, but stdout was: {bad.Stdout}");
+        Assert(bad.Stderr.Contains("error FC3002", StringComparison.Ordinal), $"missing FC3002 diagnostic on stderr: {bad.Stderr}");
+        return $"compiler stdout: {translate.Stdout.Trim()}; program stdout: 55; exit 0; --target c matches .c auto-detect";
+    }
+
+    private static string SumSquaresCShape()
+    {
+        var result = Translator.Translate(File.ReadAllText(Path.Combine(_root, "examples", "sum_squares.fc")), "sum_squares.fc", target: EmitTarget.C);
+        Assert(result.Success, "translation failed");
+        string code = result.Code!;
+        string[] required =
+        [
+            "static inline int32_t fc_lam_sumSquares_1_square(const int32_t u_x)",
+            "int32_t u_sumSquares(int32_t u_n)",
+            "int32_t u_main(void)",
+            "const int32_t u_result = u_sumSquares(5);",
+            "int main(void)",
+            "return (int)u_main();",
+        ];
+        foreach (var fragment in required)
+        {
+            Assert(code.Contains(fragment, StringComparison.Ordinal), $"missing '{fragment}' in:\n{code}");
+        }
+
+        return "found lifted static inline lambda, const let binding, separate C main(void) calling u_main()";
     }
 
     private static string SumSquaresShape()

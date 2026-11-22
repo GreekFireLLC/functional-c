@@ -364,6 +364,9 @@ public abstract class Symbol(string name, SourceLocation declaredAt)
 
     /// <summary>The identifier used for this symbol in the emitted F#.</summary>
     public string FSharpName { get; } = FSharpNames.ForSource(name);
+
+    /// <summary>The identifier used for this symbol in the emitted C.</summary>
+    public string CName { get; } = CNames.ForSource(name);
 }
 
 /// <summary>Something that can be called: a top-level function or a let-bound lambda.</summary>

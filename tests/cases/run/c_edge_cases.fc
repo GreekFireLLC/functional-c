@@ -1,0 +1,112 @@
+// Edge cases that exercise C-target lowering in particular:
+// - unused parameters, unused locals, and an uncalled lambda (must compile under -Wall -Wextra -Werror)
+// - transitive lambda captures across three levels
+// - sibling blocks defining lambdas with the same name
+// - left-to-right sequencing inside ?:, &&, ||, while, do-while (with continue), and for conditions
+
+int mark(int x)
+{
+    print(x);
+    return x;
+}
+
+int unusedHelper(int unusedParam)
+{
+    int unusedLocal = 99;
+    let unusedLet = 88;
+    let unusedLambda = (int z) => z + unusedLet;
+    return 0;
+}
+
+int transitiveCapture(int a, int b)
+{
+    let f = (int x) => x + a;
+    let g = (int y) => f(y) + b;
+    let h = () => g(10);
+    return h();
+}
+
+int siblingLambdas(int base)
+{
+    int total = 0;
+    {
+        let step = (int x) => x + base;
+        total += step(1);
+    }
+    {
+        let step = (int x) => x * base;
+        total += step(2);
+    }
+    return total;
+}
+
+int main()
+{
+    print(transitiveCapture(3, 4));    // 17
+    print(siblingLambdas(5));          // 6 + 10 = 16
+
+    // Sequenced operands inside ?: and short-circuit && / ||.
+    print(true ? mark(1) + mark(2) : mark(99));             // prints 1, 2, 3
+    print(false && (mark(98) < mark(97)) ? 1 : 0);          // prints 0 (short-circuits)
+    print(true && (mark(4) < mark(5)) ? 1 : 0);             // prints 4, 5, 1
+    print(true || (mark(96) < mark(95)) ? 1 : 0);           // prints 1 (short-circuits)
+    print(false || (mark(6) > mark(7)) ? 1 : 0);            // prints 6, 7, 0
+
+    // Sequenced while condition.
+    int w = 0;
+    while (mark(w) + mark(10) < 12) {
+        w++;
+    }                                  // w=0: 0,10; w=1: 1,10; w=2: 2,10 (stops)
+    print(w);                          // 2
+
+    // Sequenced do-while condition with continue.
+    int d = 0;
+    do {
+        d++;
+        if (d == 1) continue;
+        print(d * 100);                // prints 200
+    } while (mark(d) + mark(0) < 2);   // d=1: 1,0 (true); d=2: 2,0 (false)
+
+    // Sequenced for condition with continue.
+    int sum = 0;
+    for (int i = 0; mark(i) + mark(0) < 2; i++) {
+        if (i == 0) continue;
+        sum += i;
+    }                                  // i=0: 0,0; i=1: 1,0; i=2: 2,0 (stops)
+    print(sum);                        // 1
+    return 0;
+}
+
+//! out: 17
+//! out: 16
+//! out: 1
+//! out: 2
+//! out: 3
+//! out: 0
+//! out: 4
+//! out: 5
+//! out: 1
+//! out: 1
+//! out: 6
+//! out: 7
+//! out: 0
+//! out: 0
+//! out: 10
+//! out: 1
+//! out: 10
+//! out: 2
+//! out: 10
+//! out: 2
+//! out: 1
+//! out: 0
+//! out: 200
+//! out: 2
+//! out: 0
+//! out: 0
+//! out: 0
+//! out: 1
+//! out: 0
+//! out: 2
+//! out: 0
+//! out: 1
+//! c-contains: fc_lam_transitiveCapture_3_h(const int32_t u_a, const int32_t u_b)

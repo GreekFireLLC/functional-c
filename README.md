@@ -1,11 +1,13 @@
-# Functional C (prototype, version 1.3)
+# Functional C (prototype, version 1.4)
 
 Functional C is a small language with C syntax and functional features: immutable `let` bindings and
 lambdas alongside C's typed variables, `if`/`else` and loops. Its translator turns a `.fc` file into
-ordinary F# source, and the standard .NET SDK compiles and runs that F#.
+either ordinary **F#** (compiled by the .NET SDK) or portable **C17** (compiled by GCC/Clang with
+`-std=c17 -Wall -Wextra -Werror`).
 
 ```
-examples/sum_squares.fc ──► FunctionalC.Compiler (C#) ──► Program.fs ──► dotnet build ──► .NET program
+examples/sum_squares.fc ──► FunctionalC.Compiler (C#) ──┬──► Program.fs ──► dotnet build ──► .NET program
+                                                        └──► program.c  ──► gcc -std=c17 ──► native binary
 ```
 
 Version history:
@@ -20,6 +22,10 @@ Version history:
   and `unsigned char` are 8-bit integers that promote to `int` and wrap when stored, and casts and
   character literals work as in C. Unreachable code and a missing `return` are warnings instead of
   errors, `int x;` starts at 0, and `--strict` brings the old errors back.
+- **Version 1.4:** portable C17 backend (`--target c`, or automatic when `--out` ends in `.c`). Shares
+  the exact same lexer, parser, checker, diagnostics, deterministic output and atomic writes, lifting
+  lambdas (with transitive closure captures) to `static inline` C functions and enforcing left-to-right
+  evaluation, two's-complement wraparound and checked division without C undefined behavior.
 
 The goal is a superset of C: every C program stays valid, and the functional features are added on top.
 Version 1.3 is a step in that direction, but the language is still **not** compatible with arbitrary C
@@ -37,10 +43,11 @@ programs: there are no pointers, arrays, structures, strings, `switch`, headers 
 
 | Path | Contents |
 | --- | --- |
-| `src/FunctionalC.Compiler/` | The translator (C# console app): `Lexer.cs`, `Parser.cs`, `Ast.cs`, `Checker.cs`, `Flow.cs`, `FSharpEmitter.cs`, `Translator.cs`, `Cli.cs` |
+| `src/FunctionalC.Compiler/` | The translator (C# console app): `Lexer.cs`, `Parser.cs`, `Ast.cs`, `Checker.cs`, `Flow.cs`, `FSharpEmitter.cs`, `CEmitter.cs`, `Translator.cs`, `Cli.cs` |
 | `examples/*.fc` | Example programs (see [Examples](#examples)) |
 | `examples/sum_squares.reference.fs` | A hand-written F# translation of `sum_squares.fc` from the original design notes, kept for comparison. It is not translator output and not part of any project. |
 | `generated/SampleApp/` | F# console project. Its `Program.fs` is **generated** by the translator. |
+| `generated/SampleAppC/` | Generated C17 output (`program.c`) from the translator. |
 | `tests/FunctionalC.Tests/` | Acceptance-test harness (a plain C# console app, no test framework) |
 | `tests/cases/run/*.fc` | Behavioral tests that are translated, compiled with F# and executed |
 | `tests/cases/reject/*.fc` | Invalid programs that the translator must reject with a specific diagnostic |
@@ -58,7 +65,16 @@ dotnet build generated/SampleApp/SampleApp.fsproj
 dotnet run --no-build --project generated/SampleApp
 ```
 
-The last command prints `55` and the process exits with code 0.
+Or translate the same `.fc` file to portable C17 and compile it with GCC (a `.c` output path selects
+the C backend automatically; you can also pass `--target c` explicitly):
+
+```text
+dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleAppC/program.c
+gcc -std=c17 -Wall -Wextra -Werror generated/SampleAppC/program.c -o generated/SampleAppC/program.exe
+.\generated\SampleAppC\program.exe
+```
+
+Both commands print `55` and exit with code 0.
 
 To translate another file, see [Examples](#examples). After the first build you can call the compiled
 translator directly: `src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.exe <input.fc> --out <output.fs>`
@@ -324,8 +340,29 @@ assignments behave like the matching operator.
    end, the `main` rules, arity and types. It records each implicit conversion on the expression it
    applies to, removes unreachable statements, and gives a function that can reach its end a final
    `return 0;`. It reports every error and warning it finds, sorted by position.
-4. **Emitter** (`FSharpEmitter.cs`): produces deterministic F# with 4-space indentation and `\n` line
-   endings, and parenthesizes every compound expression.
+4. **Emitters** (`FSharpEmitter.cs`, `CEmitter.cs`): produce deterministic F# or portable C17 with 4-space
+   indentation and `\n` line endings.
+
+### Translating to C17 (`CEmitter.cs`)
+
+The C backend keeps the exact same front end and language rules and mirrors the F# backend's trade-offs:
+C handles `return`, `break`, `continue`, loops and mutable variables natively, while the emitter lifts
+functional features and removes C undefined behavior:
+
+| Functional C | C17 |
+| --- | --- |
+| `int`, `bool`, `char`, `unsigned char` | `int32_t`, `bool`, `int8_t`, `uint8_t` (fixed widths and signedness across compilers) |
+| `let x = e;` | `const <type> u_x = e;` |
+| `let f = (int x) => e;` | Lifted to file-scope `static inline` function `fc_lam_<fn>_<n>_<name>(<captures>, const int32_t u_x)` |
+| Captures (direct and transitive) | Passed as explicit `const` parameters ahead of the lambda's own parameters |
+| Lambda calling enclosing function | Emits a forward prototype of the enclosing function before its lifted lambdas |
+| `+`, `-`, `*`, unary `-` | `fc_add`, `fc_sub`, `fc_mul`, `fc_neg` via `uint32_t` wraparound (no signed-overflow UB) |
+| `/`, `%` | `fc_div`, `fc_rem` with explicit checks for `/ 0` and `INT32_MIN / -1` (writes diagnostic to stderr and exits 1) |
+| Left-to-right evaluation | Earlier effectful operands/arguments are bound to statement-level `fc_tN` temporaries (pure C17, no GNU statement expressions) |
+| User names / internal names | User identifiers get `u_` (`u_main`, `u_printf`, `u___LINE__`); internals get `fc_`, so they never collide with each other, C keywords, macros or libc |
+| `int main()` | Emitted as `int32_t u_main(void)` plus a C `int main(void)` wrapper that sets binary stdout on Windows (for `\n`) and returns `(int)u_main()` |
+
+### Translating to F# (`FSharpEmitter.cs`)
 
 | Functional C | F# |
 | --- | --- |

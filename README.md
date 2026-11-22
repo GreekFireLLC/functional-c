@@ -53,6 +53,7 @@ programs: there are no pointers, arrays, structures, strings, `switch`, headers 
 | `tests/cases/reject/*.fc` | Invalid programs that the translator must reject with a specific diagnostic |
 | `verify.ps1` | Runs the whole workflow and all tests, then writes `TEST-RESULTS.md` |
 | `TEST-RESULTS.md` | Results of the latest `verify.ps1` run |
+| `docs/C-TARGET.md` | Architecture, translation rules, side-by-side F# vs. C17 comparison, and verification details for the C17 backend |
 
 ## Quick start
 

@@ -1,6 +1,8 @@
-bin/
-obj/
+fc2c
+fc2c.exe
+tests/test_runner
+tests/test_runner.exe
 tests/work/
-generated/SampleAppC/program.exe
-generated/SampleAppC/program
+generated/*.exe
+generated/sum_squares
 *.tmp

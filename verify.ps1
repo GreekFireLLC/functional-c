@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-    Builds the Functional C translator, runs the README workflow on examples/sum_squares.fc, runs the
-    acceptance tests, and writes TEST-RESULTS.md with the exact commands, exit codes and outputs.
+    Builds the native C17 Functional C translator (fc2c), runs the README workflow on
+    examples/sum_squares.fc, runs the native C17 acceptance tests, and writes TEST-RESULTS.md.
+    Requires only a C17 compiler (gcc); zero .NET dependency.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\verify.ps1
@@ -9,8 +10,6 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Set-Location $root
-$env:DOTNET_NOLOGO = '1'
-$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
 function Invoke-Native([string]$file, [string[]]$arguments) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -31,7 +30,7 @@ function Invoke-Native([string]$file, [string[]]$arguments) {
 $steps = New-Object System.Collections.Generic.List[object]
 
 function Step([string]$title, [string]$exe, [string[]]$arguments, [int]$expectedExit = 0, [scriptblock]$extraCheck = $null) {
-    $command = "$exe " + ($arguments -join ' ')
+    $command = if ($arguments.Count -gt 0) { "$exe " + ($arguments -join ' ') } else { $exe }
     Write-Host "> $command"
     $r = Invoke-Native $exe $arguments
     $problems = @()
@@ -50,48 +49,30 @@ function Fence([string]$text) {
 }
 
 # ---------------------------------------------------------------- environment
-$sdkVersion = (Invoke-Native 'dotnet' @('--version')).Stdout.Trim()
-$sdkList = (Invoke-Native 'dotnet' @('--list-sdks')).Stdout.Trim()
 $gccVersion = ((Invoke-Native 'gcc' @('--version')).Stdout -split "`n" | Select-Object -First 1).Trim()
-$targetFramework = ([xml](Get-Content 'src/FunctionalC.Compiler/FunctionalC.Compiler.csproj')).Project.PropertyGroup.TargetFramework | Select-Object -First 1
 
-# ---------------------------------------------------------------- README workflow (F# and C)
-Step 'Build the translator' 'dotnet' @('build', 'src/FunctionalC.Compiler/FunctionalC.Compiler.csproj') | Out-Null
+# ---------------------------------------------------------------- README workflow
+Step 'Build the native C17 translator (fc2c)' 'gcc' @('-std=c17', '-Wall', '-Wextra', '-Werror', '-O2', 'src/main.c', 'src/lexer.c', 'src/parser.c', 'src/checker.c', 'src/emitter.c', '-o', 'fc2c.exe') | Out-Null
 
-Step 'Translate the sample to F#' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'examples/sum_squares.fc', '--out', 'generated/SampleApp/Program.fs') | Out-Null
+Step 'Translate the sample to C17' (Join-Path $root 'fc2c.exe') @('examples/sum_squares.fc', '--out', 'generated/sum_squares.c') | Out-Null
 
-Step 'Build the generated F#' 'dotnet' @('build', 'generated/SampleApp/SampleApp.fsproj') | Out-Null
+Step 'Compile the generated C (warnings as errors)' 'gcc' @('-std=c17', '-Wall', '-Wextra', '-Werror', 'generated/sum_squares.c', '-o', 'generated/sum_squares.exe') | Out-Null
 
-$sample = Step 'Run the generated F# program' 'dotnet' @('run', '--no-build', '--project', 'generated/SampleApp') 0 {
+$sample = Step 'Run the generated native binary' (Join-Path $root 'generated/sum_squares.exe') @() 0 {
     param($r)
     if ($r.Stdout -ne "55`n") { "stdout was '$($r.Stdout -replace "`r", '\r' -replace "`n", '\n')', expected '55\n'" }
 }
 
-Step 'Translate the sample to C' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'examples/sum_squares.fc', '--out', 'generated/SampleAppC/program.c') | Out-Null
-
-Step 'Compile the generated C (warnings as errors)' 'gcc' @('-std=c17', '-Wall', '-Wextra', '-Werror', 'generated/SampleAppC/program.c', '-o', 'generated/SampleAppC/program.exe') | Out-Null
-
-$sampleC = Step 'Run the generated C program' (Join-Path $root 'generated/SampleAppC/program.exe') @() 0 {
+$hashBefore = (Get-FileHash 'generated/sum_squares.c').Hash
+Step 'A failing translation must not touch the existing output' (Join-Path $root 'fc2c.exe') @('tests/cases/reject/immutable_reassign.fc', '--out', 'generated/sum_squares.c') 1 {
     param($r)
-    if ($r.Stdout -ne "55`n") { "stdout was '$($r.Stdout -replace "`r", '\r' -replace "`n", '\n')', expected '55\n'" }
-}
-
-$hashBefore = (Get-FileHash 'generated/SampleApp/Program.fs').Hash
-Step 'A failing translation must not touch the existing F# output' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'tests/cases/reject/immutable_reassign.fc', '--out', 'generated/SampleApp/Program.fs') 1 {
-    param($r)
-    if ((Get-FileHash 'generated/SampleApp/Program.fs').Hash -ne $hashBefore) { 'generated/SampleApp/Program.fs changed' }
+    if ((Get-FileHash 'generated/sum_squares.c').Hash -ne $hashBefore) { 'generated/sum_squares.c changed' }
 } | Out-Null
 
-$hashBeforeC = (Get-FileHash 'generated/SampleAppC/program.c').Hash
-Step 'A failing translation must not touch the existing C output' 'dotnet' @('run', '--project', 'src/FunctionalC.Compiler', '--', 'tests/cases/reject/immutable_reassign.fc', '--out', 'generated/SampleAppC/program.c') 1 {
-    param($r)
-    if ((Get-FileHash 'generated/SampleAppC/program.c').Hash -ne $hashBeforeC) { 'generated/SampleAppC/program.c changed' }
-} | Out-Null
-
-# ---------------------------------------------------------------- acceptance tests (F# and C)
-Step 'Build the test harness' 'dotnet' @('build', 'tests/FunctionalC.Tests/FunctionalC.Tests.csproj') | Out-Null
+# ---------------------------------------------------------------- acceptance tests
+Step 'Build the native C17 test harness' 'gcc' @('-std=c17', '-Wall', '-Wextra', '-Werror', '-O2', 'tests/test_runner.c', '-o', 'tests/test_runner.exe') | Out-Null
 $reportPath = 'tests/work/harness-report.md'
-$harness = Step 'Run the acceptance tests (F# and C)' 'dotnet' @('run', '--no-build', '--project', 'tests/FunctionalC.Tests', '--', '--report', $reportPath)
+$harness = Step 'Run the acceptance tests' (Join-Path $root 'tests/test_runner.exe') @('--report', $reportPath)
 $harnessSummary = ($harness.Stdout -split "`n" | Where-Object { $_ -match '^Passed: ' } | Select-Object -Last 1)
 
 # ---------------------------------------------------------------- report
@@ -99,24 +80,18 @@ $allOk = -not ($steps | Where-Object { -not $_.Ok })
 $sb = New-Object System.Text.StringBuilder
 function Add([string]$line = '') { [void]$sb.AppendLine($line) }
 
-Add '# Functional C prototype: test results'
+Add '# Functional C (native C17 translator `fc2c`): test results'
 Add
-Add 'Generated by `verify.ps1`. Every command, exit code and output below was captured from an actual run. Paths are shown relative to the repository root.'
+Add 'Generated by `verify.ps1`. Every command, exit code and output below was captured from an actual run. Zero .NET dependency.'
 Add
 Add "- Date: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))"
 Add "- OS: $([System.Environment]::OSVersion.VersionString)"
-Add "- .NET SDK used (``dotnet --version``): **$sdkVersion**"
 Add "- C compiler used (``gcc --version``): **$gccVersion**"
-Add "- Target framework of all projects: **$targetFramework**"
-Add "- Installed SDKs (``dotnet --list-sdks``):"
 Add
-Add (Fence $sdkList)
-Add
-Add "## Summary"
+Add '## Summary'
 Add
 Add "- Overall: **$(if ($allOk) { 'all steps passed' } else { 'FAILURES - see below' })**"
-Add "- Sum-of-squares program (F#): stdout ``$(($sample.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sample.ExitCode)**"
-Add "- Sum-of-squares program (C): stdout ``$(($sampleC.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sampleC.ExitCode)**"
+Add "- Sum-of-squares program: stdout ``$(($sample.Stdout -replace "`r", '\r' -replace "`n", '\n'))``, exit code **$($sample.ExitCode)**"
 Add "- Acceptance tests: $harnessSummary"
 Add
 Add '| # | Step | Command | Exit code (expected) | Result |'
@@ -161,8 +136,6 @@ if (Test-Path $reportPath) {
     Add "Report file $reportPath was not produced."
 }
 
-# The results file is published with the source, so it names no local folders: paths under the repository
-# become relative, and the user profile folder becomes '~'.
 $report = $sb.ToString().Replace($root + [System.IO.Path]::DirectorySeparatorChar, '').Replace($root, '.')
 if ($env:USERPROFILE) { $report = $report.Replace($env:USERPROFILE, '~') }
 [System.IO.File]::WriteAllText((Join-Path $root 'TEST-RESULTS.md'), $report, (New-Object System.Text.UTF8Encoding($false)))

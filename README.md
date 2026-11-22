@@ -1,568 +1,111 @@
-# Functional C (prototype, version 1.4)
+# Functional C — Native C17 Translator (`fc2c`, version 1.4)
 
 Functional C is a small language with C syntax and functional features: immutable `let` bindings and
-lambdas alongside C's typed variables, `if`/`else` and loops. Its translator turns a `.fc` file into
-either ordinary **F#** (compiled by the .NET SDK) or portable **C17** (compiled by GCC/Clang with
-`-std=c17 -Wall -Wextra -Werror`).
+lambdas alongside C's typed variables, `if`/`else` and loops. On this `native-c` branch, the translator
+itself (`fc2c`) and its acceptance test harness are written in **portable C17 with zero .NET and zero
+third-party dependencies** — all you need is a C17 compiler such as GCC or Clang.
 
+```text
+examples/sum_squares.fc ──► fc2c (C17) ──► generated/sum_squares.c ──► gcc -std=c17 ──► native binary
 ```
-examples/sum_squares.fc ──► FunctionalC.Compiler (C#) ──┬──► Program.fs ──► dotnet build ──► .NET program
-                                                        └──► program.c  ──► gcc -std=c17 ──► native binary
-```
 
-Version history:
+Related branches in this repository:
 
-- **Version 0:** expressions, functions, immutable `let`, lambdas, `?:`.
-- **Version 1:** C-style mutable variables, assignment, `if`/`else`, `while`/`do`/`for`,
-  `break`/`continue` and `return` anywhere.
-- **Version 1.1:** C-style conditions (`if (n)`, `while (1)`, `!n`, `a && b` with ints) and a set of
-  example programs.
-- **Version 1.2:** a `bool` can be used wherever an `int` is expected, as 1 or 0 (`int found = a < b;`).
-- **Version 1.3:** C's loose conversions. A number stored in a `bool` is true when it is not 0, `char`
-  and `unsigned char` are 8-bit integers that promote to `int` and wrap when stored, and casts and
-  character literals work as in C. Unreachable code and a missing `return` are warnings instead of
-  errors, `int x;` starts at 0, and `--strict` brings the old errors back.
-- **Version 1.4:** portable C17 backend (`--target c`, or automatic when `--out` ends in `.c`). Shares
-  the exact same lexer, parser, checker, diagnostics, deterministic output and atomic writes, lifting
-  lambdas (with transitive closure captures) to `static inline` C functions and enforcing left-to-right
-  evaluation, two's-complement wraparound and checked division without C undefined behavior.
-
-The goal is a superset of C: every C program stays valid, and the functional features are added on top.
-Version 1.3 is a step in that direction, but the language is still **not** compatible with arbitrary C
-programs: there are no pointers, arrays, structures, strings, `switch`, headers or preprocessor.
+- **`main`** — original Functional C → F# translator (C# / .NET SDK, version 1.3).
+- **`feature/c-target`** — dual-target C# translator supporting both F# and C17.
+- **`native-c`** (this branch) — standalone C17 translator (`fc2c`) and C17 test runner; zero .NET required.
 
 ## Requirements
 
-- The **.NET SDK** (not only the runtime): <https://dotnet.microsoft.com/en-us/download>
-- Built and tested with **.NET SDK 10.0.300**; every project targets **`net10.0`**. To use an older
-  SDK, change `<TargetFramework>` in the three project files (`src/FunctionalC.Compiler`,
-  `tests/FunctionalC.Tests` and `generated/SampleApp`).
-- No third-party packages. The translator uses neither Roslyn nor a modified F# compiler.
+- Any C17 compiler (`gcc` or `clang`). Built and tested with **GCC 15.2.0** (MSYS2 UCRT64 on Windows).
+- Zero third-party libraries. No .NET SDK, no Python, no parser generator.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `src/FunctionalC.Compiler/` | The translator (C# console app): `Lexer.cs`, `Parser.cs`, `Ast.cs`, `Checker.cs`, `Flow.cs`, `FSharpEmitter.cs`, `CEmitter.cs`, `Translator.cs`, `Cli.cs` |
-| `examples/*.fc` | Example programs (see [Examples](#examples)) |
-| `examples/sum_squares.reference.fs` | A hand-written F# translation of `sum_squares.fc` from the original design notes, kept for comparison. It is not translator output and not part of any project. |
-| `generated/SampleApp/` | F# console project. Its `Program.fs` is **generated** by the translator. |
-| `generated/SampleAppC/` | Generated C17 output (`program.c`) from the translator. |
-| `tests/FunctionalC.Tests/` | Acceptance-test harness (a plain C# console app, no test framework) |
-| `tests/cases/run/*.fc` | Behavioral tests that are translated, compiled with F# and executed |
-| `tests/cases/reject/*.fc` | Invalid programs that the translator must reject with a specific diagnostic |
-| `verify.ps1` | Runs the whole workflow and all tests, then writes `TEST-RESULTS.md` |
-| `TEST-RESULTS.md` | Results of the latest `verify.ps1` run |
-| `docs/C-TARGET.md` | Architecture, translation rules, side-by-side F# vs. C17 comparison, and verification details for the C17 backend |
+| `src/fc.h` | Shared arena allocator, string buffer, token/AST/symbol structs, diagnostics |
+| `src/lexer.c` | Hand-written tokenizer (`FC1001`–`FC1005`), no regex |
+| `src/parser.c` | Recursive-descent parser (`FC2001`–`FC2002`) |
+| `src/checker.c` | Scopes, types, mutability, captures, conversions, dead-code pruning, `--strict` (`FC3001`–`FC3018`) |
+| `src/emitter.c` | Portable C17 emitter: lambda lifting, transitive captures, left-to-right sequencing, UB-free runtime prelude |
+| `src/main.c` | CLI (`fc2c`) and atomic temp-file replacement |
+| `examples/*.fc` | 14 complete example programs (expected outputs computed independently in Python) |
+| `generated/sum_squares.c` | Generated C17 output for `examples/sum_squares.fc` |
+| `tests/test_runner.c` | Native C17 acceptance-test harness (compiles & runs every test with `gcc -std=c17 -Wall -Wextra -Werror`) |
+| `tests/cases/run/*.fc` | 39 behavioral end-to-end tests |
+| `tests/cases/reject/*.fc` | 69 invalid programs that `fc2c` must reject with exact diagnostics |
+| `Makefile` | Cross-platform build/sample/test targets (`make`, `make sample`, `make test`) |
+| `verify.ps1` | End-to-end verification script writing `TEST-RESULTS.md` |
+| `docs/NATIVE-C.md` | Full design, translation rules, and verification documentation |
+| `TEST-RESULTS.md` | Exact commands, exit codes, and outputs from the latest `verify.ps1` run |
 
 ## Quick start
 
-Run these from this folder in PowerShell or any shell:
+Windows (PowerShell) or any shell with `gcc`:
 
 ```text
-dotnet build src/FunctionalC.Compiler/FunctionalC.Compiler.csproj
-dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleApp/Program.fs
-dotnet build generated/SampleApp/SampleApp.fsproj
-dotnet run --no-build --project generated/SampleApp
+gcc -std=c17 -Wall -Wextra -Werror -O2 src/main.c src/lexer.c src/parser.c src/checker.c src/emitter.c -o fc2c.exe
+.\fc2c.exe examples/sum_squares.fc --out generated/sum_squares.c
+gcc -std=c17 -Wall -Wextra -Werror generated/sum_squares.c -o generated/sum_squares.exe
+.\generated\sum_squares.exe
 ```
 
-Or translate the same `.fc` file to portable C17 and compile it with GCC (a `.c` output path selects
-the C backend automatically; you can also pass `--target c` explicitly):
+On Linux/macOS/MSYS2 with `make`:
 
 ```text
-dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleAppC/program.c
-gcc -std=c17 -Wall -Wextra -Werror generated/SampleAppC/program.c -o generated/SampleAppC/program.exe
-.\generated\SampleAppC\program.exe
+make
+make sample
+make test
 ```
 
-Both commands print `55` and exit with code 0.
+The sample prints `55` and exits with code `0`.
 
-To translate another file, see [Examples](#examples). After the first build you can call the compiled
-translator directly: `src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.exe <input.fc> --out <output.fs>`
-(on any OS: `dotnet src/FunctionalC.Compiler/bin/Debug/net10.0/FunctionalC.Compiler.dll ...`).
+Add `--strict` to reject what C accepts by default (a number stored in a `bool`, unreachable code, a
+function reaching its end without `return`, and uninitialized declarations such as `int x;`):
 
-Translator exit codes:
+```text
+.\fc2c.exe examples/sum_squares.fc --out generated/sum_squares.c --strict
+```
+
+### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Translated. Warnings, if there are any, go to stderr. |
-| 1 | The source has errors. Diagnostics go to stderr and **the output file is left untouched**. |
-| 2 | Bad command line |
-| 3 | The input couldn't be read or the output couldn't be written |
+| `0` | Translated (warnings, if any, go to stderr) |
+| `1` | Source errors (diagnostics go to stderr; **existing output file is untouched**) |
+| `2` | Bad command line |
+| `3` | File I/O failure |
 
-The translator builds the whole F# file in memory and writes it only after every stage succeeds. It
-writes to a temporary file next to the target and then renames that file over the target, so a failed
-or interrupted translation never leaves a partial or corrupted `Program.fs`.
-
-Add `--strict` to reject what C accepts but a careful programmer avoids (see
-[Warnings and `--strict`](#warnings-and---strict)):
+## Running the acceptance tests
 
 ```text
-dotnet run --project src/FunctionalC.Compiler -- examples/sum_squares.fc --out generated/SampleApp/Program.fs --strict
+gcc -std=c17 -Wall -Wextra -Werror -O2 tests/test_runner.c -o tests/test_runner.exe
+.\tests\test_runner.exe
 ```
 
-## Examples
-
-Each file in `examples/` is a complete program. Except for the original sample `sum_squares.fc`, each one ends
-with its expected output in `//! out:` lines. Those values were computed separately in Python, not copied
-from the translator's output. The test suite translates, compiles and runs every example and compares
-the output.
-
-| Program | What it computes | Shows |
-| --- | --- | --- |
-| `sum_squares.fc` | 1² + … + 5² = 55 | The original sample: recursion, a lambda, `?:` |
-| `tour.fc` | 55 again, then the number of primes below 1000 (168) | A short tour of both halves of the language |
-| `primes.fc` | The primes below 50, and how many are below 1000 (168) | `for`, early `return`, `count++` |
-| `gcd_lcm.fc` | GCD of 1071 and 462, and the LCM of 1..20 (232792560) | Recursion vs. a loop, `while (b)` in C style |
-| `fibonacci.fc` | Fibonacci numbers, including fib(46), the largest that fits in an int | Naive recursion vs. a loop, a `bool` flag |
-| `collatz.fc` | Collatz sequence lengths and the longest one below 10000 | `while`, `?:`, `if`/`else` on one line, `n /= 2` |
-| `perfect_numbers.fc` | The perfect numbers up to 10000, an amicable pair, and how many abundant numbers there are up to 100 | Divisor sums, chained `?:` |
-| `digits.fc` | Digit sums, reversed numbers, digital roots, and palindromes below 10000 | `/` and `%` loops, counting with `palindromes += isPalindrome(n);` |
-| `integer_sqrt.fc` | Integer square roots up to `isqrt(2147483647)` = 46340 | Binary search that can't overflow |
-| `modular_power.fc` | `base^exponent mod m`, and the Fermat pseudoprimes 341, 561 and 645 | Square-and-multiply with a loop and with recursion |
-| `fizzbuzz_numbers.fc` | FizzBuzz, printing -3, -5 and -15 in place of the words | Early returns, `else if` chains |
-| `local_lambdas.fc` | Clamped squares, triangle numbers and sums of cubes | `let` lambdas calling each other and the enclosing function, copying a loop counter before capturing it |
-| `ackermann.fc` | Ackermann's function for m ≤ 3 and n ≤ 4 | Deep nested recursion |
-| `eight_bits.fc` | An 8-bit checksum, the period of an 8-bit random number generator (256), and lower-case letters | `char` and `unsigned char`, promotion to `int`, wrapping at 8 bits, a number stored in a `bool` |
-
-To run one, translate it into the sample project:
-
-```text
-dotnet run --project src/FunctionalC.Compiler -- examples/collatz.fc --out generated/SampleApp/Program.fs
-dotnet build generated/SampleApp/SampleApp.fsproj
-dotnet run --no-build --project generated/SampleApp
-```
-
-## Running the tests
-
-```text
-dotnet run --project tests/FunctionalC.Tests
-```
-
-Or run everything (workflow and tests) and save a results file:
+Or run the full verification workflow and regenerate `TEST-RESULTS.md`:
 
 ```text
 powershell -ExecutionPolicy Bypass -File .\verify.ps1
 ```
 
-Each behavioral test goes through the full pipeline: the `.fc` file is translated by the translator CLI
-code, the result is placed in its own F# project under `tests/work/`, built with `dotnet build` (with
-**warnings treated as errors**, so the generated F# must compile cleanly), and then run. The test
-checks stdout byte for byte, the exit code, and stderr where relevant. Rejection tests check the exit
-code, the diagnostic code, the line and column, the message, and that no output file was written. The
-harness also runs the compiler as a separate process. Options: `--filter <text>`, `--parallel <n>`
-and `--report <file.md>`.
+Every behavioral test translates the `.fc` file with `fc2c`, compiles the generated `.c` with
+`gcc -std=c17 -Wall -Wextra -Werror`, runs the resulting native binary, and compares stdout byte for
+byte along with the exit code and stderr diagnostics. Rejection tests verify exit code `1`, exact
+diagnostic file/line/column/code/message, and that no output or `.tmp` file was written.
 
-A behavioral test lists every warning it expects from the translator (`//! warning:` lines), and fails
-if the translator gives one more or one fewer. A test with `//! flags: --strict` is translated in strict
-mode.
+## Language & translation overview
 
-## The language
+Functional C implements the exact version 1.3/1.4 language contract:
 
-```c
-// Immutable bindings, lambdas and recursion (version 0)...
-int sumSquares(int n)
-{
-    let square = (int x) => x * x;
-    return n <= 0 ? 0 : square(n) + sumSquares(n - 1);
-}
+- **Types:** `int` (`int32_t`), `bool`/`_Bool` (`bool`), `char`/`signed char` (`int8_t`), `unsigned char` (`uint8_t`).
+- **Immutable `let` & lambdas:** `let x = expr;` emits `const`; `let f = (int x) => expr;` lifts to a file-scope `static inline` C function with direct and transitive captures passed as explicit `const` parameters.
+- **Mutable C variables & control flow:** typed declarations, `= += -= *= /= %= ++ --`, `if`/`else`, `while`, `do`/`while`, `for`, `break`, `continue`, and `return` anywhere.
+- **Loose C conversions & `--strict`:** numbers as truth values, `bool` as `1`/`0`, integer promotion in arithmetic, low-8-bit wrapping on `char`/`unsigned char`, explicit casts `(type) x`, and character literals.
+- **Deterministic semantics without C UB:** left-to-right operand/argument evaluation via statement-level `fc_tN` temporaries (pure C17, no GNU statement expressions), 32-bit wraparound arithmetic via `uint32_t`, checked `/` and `%` on `0` and `INT32_MIN / -1`, and collision-free `u_`/`fc_` identifier prefixes.
 
-// ...and C-style variables, if and loops (version 1).
-bool isPrime(int n)
-{
-    if (n < 2) return false;
-    for (int d = 2; d * d <= n; d++) {
-        if (n % d == 0) return false;
-    }
-    return true;
-}
-
-int main()
-{
-    print(sumSquares(5));          // 55
-    int count = 0;
-    for (int n = 2; n < 1000; n++) {
-        if (isPrime(n)) count++;
-    }
-    print(count);                  // 168
-    return 0;
-}
-```
-
-| Feature | Behavior |
-| --- | --- |
-| Types | `int` (signed 32-bit), `bool` (also spelled `_Bool`), `char` (signed 8-bit, also spelled `signed char`) and `unsigned char` (unsigned 8-bit). `signed` and `signed int` mean `int`. Function parameters and return types are written explicitly. |
-| Literals | Decimal integers, `true` and `false`, and character literals such as `'a'`, `'\n'` and `'\0'`. As in C, a character literal is an `int`: `'a'` is 97. |
-| Functions | `type name(type a, type b) { ... }`. A function may call itself and any function defined **above** it. |
-| Immutable bindings | `let name = expression;`. The type is inferred, and the binding can never be assigned. |
-| Mutable variables | `int x = 0;` and `bool done = false, seen = true;`, written C style. Without an initializer (`int x;`) the variable starts at 0, or `false` for a `bool`. Function parameters are mutable local copies, as in C. |
-| Assignment | `x = e;`, `x += e;`, `-=`, `*=`, `/=`, `%=`, and `x++;`, `++x;`, `x--;`, `--x;`. These are **statements**, not expressions. |
-| Lambdas | `(int x) => expr`, `(int a, bool b) => expr`, `() => expr`. A lambda can capture enclosing `let` bindings, parameters and variables that are never assigned, call other lambdas in scope, and call the enclosing function. |
-| Calls | `f(a, b)` for functions and let-bound lambdas |
-| Operators | Unary `-` and `!`, and casts `(type) x`. Binary `* / %`, `+ -`, `< <= > >=`, `== !=`, `&&`, `\|\|`, and `?:` |
-| Conversions | As in C, every value type converts to every other without a cast (see [Typing rules](#typing-rules)). A number used as a condition (`if (n)`, `while (1)`, `n ? a : b`) or as an operand of `!`, `&&` or `\|\|` is true when it is not 0, including negative numbers. A `bool` used as a number counts as 1 or 0 (`int found = a < b;`, `count += x > 0;`). A number stored in a `bool` becomes `true` when it is not 0 (`bool done = n;`). A `char` is promoted to `int` in arithmetic, and an `int` stored in a `char` keeps its low 8 bits. |
-| `if` | `if (c) stmt`, `if (c) stmt else stmt`, `else if` chains. Braces are optional, and a dangling `else` binds to the nearest `if`. |
-| Loops | `while (c) stmt`, `do stmt while (c);`, `for (init; cond; update) stmt`. The `for` initializer can be declarations (`int i = 0, j = 10`) or assignments, the update can be several statements separated by commas, and any part can be empty (`for (;;)`). |
-| Jumps | `break;` and `continue;` (innermost loop), and `return expr;` anywhere |
-| Blocks | `{ ... }` with its own scope, plus the empty statement `;` |
-| Other statements | Call statements `f(x);` (the result is discarded and the call still runs) and `print(intExpr);` |
-| Comments | `// line` and `/* block */` (block comments don't nest) |
-| Entry point | Exactly one `int main()` with no parameters. Its return value becomes the process exit code. |
-
-### Precedence and associativity
-
-Precedence follows C, from tightest to loosest:
-
-| Level | Operators | Associativity |
-| --- | --- | --- |
-| 1 | call `f(...)` | — |
-| 2 | unary `-`, `!`, cast `(type)` | right |
-| 3 | `*` `/` `%` | left |
-| 4 | `+` `-` | left |
-| 5 | `<` `<=` `>` `>=` | left |
-| 6 | `==` `!=` | left |
-| 7 | `&&` | left |
-| 8 | `\|\|` | left |
-| 9 | `? :` | right |
-
-Assignment and `++`/`--` aren't in this table because they are statements, not operators.
-
-### Typing rules
-
-The translator checks these rules itself. They are C's rules: F# converts nothing implicitly, so the
-translator works out each conversion and writes it into the F#.
-
-- **A number as a truth value.** The conditions of `if`, `while`, `do`, `for` and `?:`, and the operands
-  of `&&`, `||` and `!`, may be of any type. A number is true when it is not 0, as in C, so
-  `while (1)`, `if (n)`, `if (!n)` and `if (n % 2 && ok)` all work. `&&`, `||`, `!` and the comparisons
-  produce a `bool`.
-- **Integer promotion.** The operands of `+ - * / %`, unary `-` and `< <= > >=` are converted to `int`
-  first: a `char` or `unsigned char` keeps its value, and a `bool` counts as 1 or 0. The arithmetic is
-  done in `int`, so `c + 1000` doesn't wrap even when `c` is a `char`, and `(a < b) + (c < d)` counts
-  how many comparisons hold. `print` promotes its argument the same way: `print(true)` prints 1 and
-  `print('a')` prints 97.
-- **Storing, passing and returning.** A value is converted to the type of the variable, parameter or
-  function it goes to:
-  - to `int`: a `char` keeps its value, and a `bool` becomes 1 or 0 (`int found = a < b;`,
-    `return a == b;`).
-  - to `bool`: any number that is not 0 becomes `true` (`bool done = n;`, `return n % d;`). So
-    `bool b = 256;` is true, although the low 8 bits of 256 are 0.
-  - to `char` or `unsigned char`: the low 8 bits are kept, so `char c = 200;` stores -56,
-    `unsigned char u = 300;` stores 44 and `unsigned char u = -1;` stores 255. C calls the signed case
-    implementation-defined; this is what GCC, Clang and MSVC do.
-- **Casts.** `(type) x` is the same conversion written out: `(char) n`, `(unsigned char) n`, `(bool) n`,
-  `(int) flag`. A cast binds like unary minus, so `(char) n + 200` converts only `n`.
-- **`==` and `!=`.** Two values of the same type compare directly. Otherwise both are promoted to
-  `int`, so `n == true` means `n == 1` and is false when `n` is 2. That is the same pitfall as in C;
-  write `if (n)` instead. A `char` holding -1 and an `unsigned char` holding 255 are different numbers.
-- **`?:`.** Both branches have the same type, or both are promoted and the result is an `int`.
-- **Compound assignment.** `+= -= *= /= %=` and `++`/`--` need an `int`, `char` or `unsigned char`
-  variable. On a `char` they compute in `int` and keep the low 8 bits of the result, so `c++` on a
-  `char` holding 127 gives -128. They are rejected on a `bool` variable.
-- `print` takes one argument and produces no value, so it can only be used as a statement.
-- Call arity must match.
-
-### Scope and mutability rules
-
-- **Blocks.** Each block (`{ }`, an `if` branch or a loop body) has its own scope. Variables declared in a
-  `for` initializer belong to the loop.
-- **No shadowing.** A name may not redeclare or shadow a visible name (an enclosing block's variable, a
-  parameter, a function, or `print`). Sibling blocks may reuse names, so two consecutive
-  `for (int i = ...)` loops are fine.
-- **What can be assigned.** `let` bindings, lambda parameters, lambdas and functions can never be
-  assigned. Typed variables (`int x = ...`) and function parameters can.
-- **Lambda captures.** A lambda may not capture a variable that is assigned anywhere in the function,
-  because F# closures can't capture mutable locals. Copy the value first: `let now = x;` and then use
-  `now` in the lambda.
-- **Self-reference.** A binding or variable is not in scope inside its own initializer.
-- **Declaration order.** Forward references and mutual recursion are rejected with a dedicated message.
-  Define a function before you use it.
-- **Lambda placement.** A lambda may appear only as the entire initializer of a `let`. Functions and
-  lambdas aren't first-class values.
-
-### Control-flow rules
-
-- **Reaching the end of a function.** A function that can reach its closing brace without a `return`
-  returns 0 there, or `false` from a `bool` function, and the translator gives warning FC3005. In C the
-  value is undefined when the caller uses it. `main` is the exception C itself makes: reaching its end
-  returns 0, with no warning. A loop like `while (true)`, `while (1)` or `for (;;)` with no `break`
-  never finishes, so nothing is reached after it. Only a literal counts as always true: the checker
-  doesn't evaluate other constant expressions such as `while (2 > 1)`.
-- **Unreachable code.** Code that can never run, such as a statement after `return`, `break` or
-  `continue`, or after an infinite loop, gets warning FC3016 and is left out of the F#. It is still
-  checked, so an unknown name in it is an error.
-- With `--strict` both are errors.
-- `break` and `continue` must be inside a loop and apply to the innermost one. In a `for` loop,
-  `continue` still runs the update. In a `do` loop, `continue` jumps to the condition.
-
-### Evaluation semantics
-
-- **Left to right.** Call arguments and binary operands are evaluated left to right. Where the emitted
-  F# would otherwise depend on F#'s own ordering, meaning two or more operands that could print,
-  recurse or throw, the translator binds the earlier operands to fresh temporaries in source order.
-- **Conditional expressions.** `c ? a : b` evaluates only the selected branch.
-- **Short-circuiting.** `&&` and `||` short-circuit.
-- **Loop conditions.** A `while` or `for` condition is evaluated once before each iteration, including
-  the final test that fails. It is not evaluated again after `break` or `return`.
-- **`print(x)`** writes the decimal value in the invariant culture, followed by a single `\n`, on every
-  OS. Program output goes to stdout; translator diagnostics go to stderr of a different process.
-
-### Integer semantics
-
-These are .NET's `int` semantics. Where C leaves a case undefined or up to the compiler, this is the
-choice Functional C makes. They were verified by `tests/cases/run/integer_semantics.fc`,
-`mutable_variables.fc`, `char_types.fc`, `casts.fc` and the three runtime-exception tests. Compound
-assignments behave like the matching operator.
-
-| Case | Result |
-| --- | --- |
-| `+`, `-`, `*`, unary `-` on overflow | Wrap around (two's complement): `2147483647 + 1` is `-2147483648`, `-(-2147483648)` is `-2147483648`, and `2147483647 * 2` is `-2`. |
-| `/` | Truncates toward zero: `-7 / 2` is `-3` and `7 / -2` is `-3`. |
-| `%` | Takes the sign of the dividend: `-7 % 2` is `-1` and `7 % -2` is `1`. |
-| `x / 0`, `x % 0` | Throws `System.DivideByZeroException`. The program dies with an unhandled exception. Observed exit code on Windows: `-1073741676` (`0xC0000094`). |
-| `-2147483648 / -1`, `-2147483648 % -1` | Throws `System.OverflowException`. Observed exit code on Windows: `-1073741675` (`0xC0000095`). |
-| An `int` stored in a `char` or `unsigned char` | Keeps the low 8 bits: 200 becomes -56 in a `char`, and 300 becomes 44 and -1 becomes 255 in an `unsigned char`. |
-| `char` | Signed, -128 to 127. C lets the compiler choose; this is the choice on x86 and x64. |
-| Literals | `0` through `2147483647`. `-2147483648` is allowed only with the minus written directly before the digits, and `-(2147483648)` is rejected. Anything larger, and leading zeros (C octal), hex, suffixes and floating-point literals, are rejected with a diagnostic. |
-| Character literals | One printable ASCII character or one of the escapes `\n \t \r \0 \a \b \f \v \\ \' \" \?`. Multi-character literals, and octal and hex escapes, are rejected. |
-
-## How the translation works
-
-1. **Lexer** (`Lexer.cs`): turns the source into tokens carrying the file, line and column (a tab
-   counts as one column). Multi-character operators are matched before their prefixes. Unsupported
-   C tokens (`#`, `[`, `&`, `->`, `.`, `<<`, strings and so on) are rejected with a specific message.
-   A character literal becomes an integer token, as it is an `int` in C.
-2. **Parser** (`Parser.cs`): recursive descent, with one method per precedence level, building the AST
-   (`Ast.cs`). Casts, lambdas and parentheses are told apart on purpose: `(type)` alone is a cast,
-   `(type name` or `() =>` starts a lambda. Assignment and `++`/`--` are recognized only as statements; inside an expression they get a
-   targeted error ("did you mean '=='?"). The parser stops at the first syntax error.
-3. **Checker** (`Checker.cs`, `Flow.cs`): name resolution, block scopes, mutability and capture rules,
-   declaration-before-use, `break`/`continue` placement, unreachable code, functions that reach their
-   end, the `main` rules, arity and types. It records each implicit conversion on the expression it
-   applies to, removes unreachable statements, and gives a function that can reach its end a final
-   `return 0;`. It reports every error and warning it finds, sorted by position.
-4. **Emitters** (`FSharpEmitter.cs`, `CEmitter.cs`): produce deterministic F# or portable C17 with 4-space
-   indentation and `\n` line endings.
-
-### Translating to C17 (`CEmitter.cs`)
-
-The C backend keeps the exact same front end and language rules and mirrors the F# backend's trade-offs:
-C handles `return`, `break`, `continue`, loops and mutable variables natively, while the emitter lifts
-functional features and removes C undefined behavior:
-
-| Functional C | C17 |
-| --- | --- |
-| `int`, `bool`, `char`, `unsigned char` | `int32_t`, `bool`, `int8_t`, `uint8_t` (fixed widths and signedness across compilers) |
-| `let x = e;` | `const <type> u_x = e;` |
-| `let f = (int x) => e;` | Lifted to file-scope `static inline` function `fc_lam_<fn>_<n>_<name>(<captures>, const int32_t u_x)` |
-| Captures (direct and transitive) | Passed as explicit `const` parameters ahead of the lambda's own parameters |
-| Lambda calling enclosing function | Emits a forward prototype of the enclosing function before its lifted lambdas |
-| `+`, `-`, `*`, unary `-` | `fc_add`, `fc_sub`, `fc_mul`, `fc_neg` via `uint32_t` wraparound (no signed-overflow UB) |
-| `/`, `%` | `fc_div`, `fc_rem` with explicit checks for `/ 0` and `INT32_MIN / -1` (writes diagnostic to stderr and exits 1) |
-| Left-to-right evaluation | Earlier effectful operands/arguments are bound to statement-level `fc_tN` temporaries (pure C17, no GNU statement expressions) |
-| User names / internal names | User identifiers get `u_` (`u_main`, `u_printf`, `u___LINE__`); internals get `fc_`, so they never collide with each other, C keywords, macros or libc |
-| `int main()` | Emitted as `int32_t u_main(void)` plus a C `int main(void)` wrapper that sets binary stdout on Windows (for `\n`) and returns `(int)u_main()` |
-
-### Translating to F# (`FSharpEmitter.cs`)
-
-| Functional C | F# |
-| --- | --- |
-| `int f(int a, bool b) { ... }` | `let f (a: int) (b: bool) : int =` (curried, used the same way for functions, lambdas and calls) |
-| `char`, `unsigned char` | `sbyte`, `byte`. C's `char` is an 8-bit integer, so it doesn't map to F#'s 16-bit `char`. |
-| a function that calls itself (also from inside a lambda) | `let rec f ...` |
-| `let x = e;` | `let x = e` |
-| `int x = e;` | `let mutable x = e` if `x` is ever assigned, otherwise `let x = e` |
-| an assigned parameter `n` | `let mutable n = n` at the start of the body |
-| `x = e;`, `x += e;`, `x++;` | `x <- e`, `x <- (x + e)`, `x <- (x + 1)` |
-| `if (c) A else if (d) B else C` | `if c then A elif d then B else C` |
-| `while (c) S` | `while c do S` |
-| `do S while (c);` | `let mutable fc'againN = true` / `while fc'againN do S; fc'againN <- c` |
-| `for (I; c; U) S` | `I` / `while c do S; U` |
-| `(int x) => e`, `() => e` | `(fun (x: int) -> e)`, `(fun () -> e)` |
-| `c ? a : b` | `(if c then a else b)` |
-| `==`, `!=`, `!x` | `=`, `<>`, `(fc'not x)` |
-| an `int` used as a truth value: `if (n)`, `!n`, `n && m` | `if (n <> 0) then`, `(n = 0)`, `((n <> 0) && (m <> 0))`. A literal becomes `true` or `false`, so `while (1)` becomes `while true do`. |
-| a `bool` used as an `int`: `int found = a < b;`, `print(true);` | `let found = (if (a < b) then 1 else 0)`, `fc'print 1` |
-| a number stored in a `bool`: `bool done = n;`, `bool one = 1;` | `let done = (n <> 0)`, `let one = true` |
-| a `char` promoted to `int`: `c + 1`, `print(c);` | `((fc'int c) + 1)`, `fc'print (fc'int c)` |
-| an `int` stored in a `char`: `char c = n;`, `char big = 200;` | `let c = (fc'char n)`, `let big = (-56y)`. A literal is converted by the translator. |
-| a `char` as a truth value: `while (c)`, `!c` | `while (c <> 0y) do`, `(c = 0y)` (`0uy` for an `unsigned char`) |
-| `c++;`, `u += n;` on a `char` and an `unsigned char` | `c <- (fc'char ((fc'int c) + 1))`, `u <- (fc'uchar ((fc'int u) + n))` |
-| a cast: `(char) n`, `(bool) n` | the same conversions: `(fc'char n)`, `(n <> 0)` |
-| `int x;` | `let x = 0` (`let mutable x = 0` if it is assigned later) |
-| a function that can reach its end | a final `0`, `false`, `0y` or `0uy`, as if the source ended with `return 0;` |
-| `f(x);` (call statement) | `fc'ignore (f x)` |
-| `print(e);` | `fc'print e` |
-| `int main()` | an ordinary `let main () : int =` plus a separate `[<EntryPoint>] let fc'entry (_args: string array) : int = main ()` |
-
-**`return`, `break` and `continue`.** F# has none of these, so each function body is emitted in one
-of two modes:
-
-- **Expression mode** is used when every `return` is in a position F# can express directly. Either the
-  code runs straight through to a final `return`, or an `if` has one branch that always returns, in
-  which case the statements after the `if` move into the other branch without duplicating any code.
-  Most functions look like hand-written F#:
-
-  ```fsharp
-  let sign (x: int) : int =
-      if (x < 0) then
-          (-1)
-      elif (x = 0) then
-          0
-      else
-          1
-  ```
-
-- **Flag mode** is used otherwise, meaning a `return` inside a loop or inside an `if` that only
-  sometimes returns. The value goes into `fc'result`, and `fc'returned` records that a return happened.
-  Statements that may follow a `return`, `break` or `continue` are guarded by these flags, and loop
-  conditions test the flags first.
-
-  ```fsharp
-  let firstMultiple (start: int) (k: int) : int =
-      let mutable start = start
-      let mutable fc'result = 0
-      let mutable fc'returned = false
-      while (fc'not fc'returned) do
-          if ((start % k) = 0) then
-              fc'result <- start
-              fc'returned <- true
-          if (fc'not fc'returned) then
-              start <- (start + 1)
-      fc'result
-  ```
-
-`break` and `continue` use per-loop flags (`fc'brkN`, `fc'contN`) in both modes. Loops become real
-.NET `while` loops, so a million iterations don't grow the stack (`tests/cases/run/million_iterations.fc`).
-
-**Names.** Identifiers are mapped consistently:
-
-- F# keywords and reserved words are quoted: `match` becomes ``` ``match`` ``` and `type` becomes
-  ``` ``type`` ```.
-- Names that start with an uppercase letter or `_` get a `u'` prefix: `None` becomes `u'None` and
-  `__LINE__` becomes `u'__LINE__`. Without it, F# would read them as union cases or active patterns
-  (`None`, `Some`, `Ok`, `Failure`, ...) or special identifiers.
-- Translator-internal names (`fc'print`, `fc'ignore`, `fc'not`, `fc'int`, `fc'char`, `fc'uchar`,
-  `fc'entry`, `fc'result`, `fc'brk1`, temporaries `fc't1`, ...) use an apostrophe. Functional C identifiers can't contain an apostrophe,
-  so internal names can never collide with source names.
-- `print` is reserved for the built-in.
-
-Every generated file starts with a small runtime prelude: `fc'print`, `fc'ignore`, `fc'not`, and the
-conversions `fc'int`, `fc'char` and `fc'uchar`, which wrap F#'s `int`, `sbyte` and `byte` functions. The
-prelude is defined before any user code, so user names (even a user function named `not` or a variable
-named `byte`) can't shadow what the generated code relies on.
-
-## Diagnostics
-
-Diagnostics use the conventional format `file(line,column): error CODE: message`, for example:
-
-```text
-tests/cases/reject/immutable_reassign.fc(4,5): error FC3002: cannot assign to 'x': 'let' bindings are immutable ('x' was bound at 3:9); declare it as 'int x = ...;' if it needs to change
-```
-
-| Code | Meaning |
-| --- | --- |
-| FC1001–FC1005 | Lexical: unexpected character, unterminated comment, integer out of range, invalid literal (including a malformed character literal), unsupported C token |
-| FC2001 | Syntax error, for example a missing `;`, `)` or `}`, or an `else` without an `if`. The message includes the line and column. |
-| FC2002 | Unsupported C feature: pointers, `switch`, `goto`, `void`, `unsigned int`, assignment or `++` inside an expression, ... With `--strict`, also a variable declared without an initializer. |
-| FC3001 | Unknown name (including assignment to an undeclared name) |
-| FC3002 | Assignment to something immutable: a `let` binding, lambda parameter, lambda or function |
-| FC3003 | Duplicate name or shadowing |
-| FC3004 | Forward reference or mutual recursion |
-| FC3005 | A function can reach its end without returning a value. A **warning**; an error with `--strict`. |
-| FC3006 | Entry point: `main` missing, duplicated, not `int`, or has parameters |
-| FC3007 | Type mismatch: `+=` or `++` on a `bool` variable. With `--strict`, also a number stored in, passed as or returned as a `bool`. |
-| FC3008 | Wrong number of arguments |
-| FC3009 / FC3010 | A function used as a value / a value called as a function |
-| FC3011 | An expression statement that isn't a call, assignment or increment |
-| FC3012 | `print` used as a name |
-| FC3013 | `print(...)` used as a value |
-| FC3014 | A lambda that isn't a `let` initializer |
-| FC3015 | A binding or variable used in its own initializer |
-| FC3016 | Unreachable statement. A **warning**; an error with `--strict`. |
-| FC3017 | A lambda capturing a variable that is assigned |
-| FC3018 | `break` or `continue` outside a loop |
-
-### Warnings and `--strict`
-
-C accepts some things that a careful programmer avoids. By default the translator follows C. A warning
-has the same format as an error, with the word `warning`, and doesn't stop the translation:
-
-```text
-tests/cases/run/falls_off_end.fc(13,1): warning FC3005: function 'sign' can reach its end without returning a value; it returns 0 there (C leaves the value undefined)
-```
-
-| In the source | Default | With `--strict` |
-| --- | --- | --- |
-| A number stored in, passed as or returned as a `bool` (`bool done = 1;`) | Converted, as in C: true when it is not 0 | Error FC3007 |
-| A statement that can never run | Warning FC3016; the statement is left out | Error FC3016 |
-| A function that can reach its end without a `return` | Warning FC3005 (none for `main`); it returns 0 or `false` | Error FC3005, for `main` too |
-| A variable declared without a value (`int x;`) | Starts at 0 or `false` | Error FC2002 |
-
-`--strict` gives the rules that versions up to 1.2 always applied. Casts and the `char` types work in
-both modes, and so do a `bool` used as a number and a number used as a condition.
-
-**Where checking happens.** The translator checks every rule above before writing anything. The F#
-compiler then checks the generated code again when you run `dotnet build`. This is a check for the
-supported subset, not a proven-complete independent type system. If F# ever reports an error, it
-refers to line numbers in the **generated** file (for example `generated/SampleApp/Program.fs`), not
-the `.fc` source. That would mean a translator bug, so please keep the `.fc` input that caused it.
-
-## Limitations and known issues
-
-- No pointers, arrays, structures, strings, floating point, bitwise or shift operators, headers,
-  preprocessor, `switch`, `goto`, `void`, global variables or function prototypes.
-- The integer types are `int`, `char` and `unsigned char`. There is no `short`, `long` or
-  `unsigned int` yet.
-- Assignment and `++`/`--` are statements only, and there is no comma operator, so
-  `while ((c = next()) != 0)` and `a[i++]`-style code isn't supported. The comma is allowed only between
-  declarators and in a `for` header.
-- `+=`, `++` and the other compound assignments are rejected on a `bool` variable, though C accepts
-  them.
-- `let` is a keyword, so a C program that uses `let` as a name is rejected.
-- No forward references or mutual recursion; a function can only call functions defined above it.
-- No shadowing, recursive lambdas, or first-class functions (you can't pass or return a function). A
-  lambda can't capture a variable that is assigned.
-- Deep non-tail *recursion* (not loops) can overflow the .NET stack, for example `sumSquares(100000)`.
-- Columns count characters, so a tab is one column. Identifiers are ASCII only.
-- The exit code is the value `main` returns. On Linux and macOS only the low 8 bits are visible to
-  the shell.
-- Runtime errors (division by zero, `MinValue / -1`) end the program with an unhandled .NET
-  exception. There is no error handling in the language.
-- `generated/SampleApp/Program.fs` is overwritten by every translation into it.
-- Known translation bugs: none found by the current test suite (see `TEST-RESULTS.md`).
-
-## Related work and the name
-
-This project is unrelated to *Functional C* by Pieter Hartel and Henk Muller (Addison Wesley Longman,
-1997). That textbook teaches C to programmers who already know a functional language
-([University of Twente record](https://research.utwente.nl/en/publications/functional-c)). Some
-neighbours of this project:
-
-- [SaC (Single Assignment C)](https://sac-home.org/): a purely functional array language with C-like
-  syntax, whose compiler generates C.
-- [Reason](https://reasonml.github.io/) and [ReScript](https://rescript-lang.org/): a familiar,
-  JavaScript-like syntax on top of OCaml, the closest idea to putting C syntax on top of F#.
-- [Fable](https://fable.io/): compiles F# to JavaScript and other languages.
-- [cs2fs](https://github.com/matthid/cs2fs): an experimental C#-to-F# transpiler.
-- In the other direction, functional languages such as [Koka](https://koka-lang.github.io/koka/doc/index.html),
-  [Lean 4](https://lean-lang.org/) and [CHICKEN Scheme](https://call-cc.org/) compile *to* C.
-
-## History
-
-Functional C began as a short design note: a C-shaped functional language whose translator, written in
-C#, emits readable F# that the .NET SDK compiles.
-
-- Version 0 implemented that note: expressions, functions, immutable bindings and lambdas.
-- Version 1 added C-style mutable variables, `if` and loops, keeping `let` immutable.
-- Version 1.1 added C-style int conditions and the example programs.
-- Version 1.2 let a `bool` be used as an `int`.
-- Version 1.3 set the direction as a superset of C and took on C's loose conversions: a number as a
-  `bool`, the 8-bit `char` types, casts and character literals. What had been errors on purpose
-  (unreachable code, a missing `return`, an uninitialized variable) became C's behavior with
-  warnings, and `--strict` keeps the old rules available.
-
-The SDK, target framework and results recorded in `TEST-RESULTS.md` come from actual runs.
+See [docs/NATIVE-C.md](docs/NATIVE-C.md) for the complete technical specification and generated C17 examples.
 
 ## License
 

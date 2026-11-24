@@ -343,7 +343,18 @@ static bool run_process(const char *const *argv, ProcResult *res) {
     buf_init(&cmd);
     for (int i = 0; argv[i]; i++) {
         if (i > 0) buf_append(&cmd, " ");
-        append_win_quoted(&cmd, argv[i]);
+        if (i == 0) {
+            /* CreateProcess does not resolve a relative program path written
+               with forward slashes, so hand it the native separator. */
+            char *prog = xstrdup(argv[0]);
+            for (char *p = prog; *p; p++) {
+                if (*p == '/') *p = '\\';
+            }
+            append_win_quoted(&cmd, prog);
+            free(prog);
+        } else {
+            append_win_quoted(&cmd, argv[i]);
+        }
     }
 
     STARTUPINFOA si;
